@@ -211,11 +211,49 @@ export function toSquadRules(bootstrap: RawBootstrap): SquadRules {
   };
 }
 
+/**
+ * Determines whether the element stat block describes last season or this one.
+ *
+ * Pre-season, FPL leaves last season's totals in `bootstrap-static` and only
+ * resets them once the season is under way. Two signals together, because
+ * either alone can mislead:
+ *   - no gameweek has started or finished yet, AND
+ *   - players nevertheless have recorded minutes
+ * ...means we are looking at carryover from the previous season.
+ */
+/**
+ * Labels the previous season from the upcoming season's first deadline.
+ * A season starting in August 2026 is 2026/27, so the carryover stats are 2025/26.
+ */
+function previousSeasonLabel(bootstrap: RawBootstrap): string | null {
+  const first = [...bootstrap.events].sort((a, b) => a.id - b.id)[0];
+  if (!first) return null;
+
+  const year = new Date(first.deadline_time).getUTCFullYear();
+  if (Number.isNaN(year)) return null;
+
+  const start = year - 1;
+  return `${start}/${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+export function deriveStatsSeason(bootstrap: RawBootstrap): 'PREVIOUS' | 'CURRENT' {
+  const seasonUnderway = bootstrap.events.some((event) => event.finished || event.is_current);
+  if (seasonUnderway) return 'CURRENT';
+
+  const hasRecordedMinutes = bootstrap.elements.some((element) => element.minutes > 0);
+  return hasRecordedMinutes ? 'PREVIOUS' : 'CURRENT';
+}
+
 export function toSeasonMeta(bootstrap: RawBootstrap, ingestedAt: string): SeasonMeta {
   const current = bootstrap.events.find((event) => event.is_current) ?? null;
   const next = bootstrap.events.find((event) => event.is_next) ?? null;
+  const statsSeason = deriveStatsSeason(bootstrap);
 
   return {
+    statsSeason,
+    // Only labelled when we know the stats are carryover; mid-season the label
+    // would be guesswork, and a wrong label is worse than none.
+    statsSeasonLabel: statsSeason === 'PREVIOUS' ? previousSeasonLabel(bootstrap) : null,
     currentEvent: current?.id ?? null,
     nextEvent: next?.id ?? null,
     nextDeadline: next?.deadline_time ?? null,

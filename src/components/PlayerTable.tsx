@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 
-import type { Player, Position } from '../../shared/types';
+import type { Player, Position, SeasonMeta } from '../../shared/types';
 import { AVAILABILITY_LABEL, availabilityClasses, formatPrice } from '../lib/format';
 
 type SortKey = 'epNext' | 'price' | 'totalPoints' | 'selectedByPercent' | 'xGIPer90';
@@ -21,7 +21,15 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 const POSITIONS: Array<Position | 'ALL'> = ['ALL', 'GKP', 'DEF', 'MID', 'FWD'];
 
-export function PlayerTable({ players }: { players: Player[] }) {
+export function PlayerTable({ players, meta }: { players: Player[]; meta: SeasonMeta }) {
+  /**
+   * Before the season starts FPL leaves LAST season's totals in the payload.
+   * Showing them under a bare "Pts" heading presents carryover as current-season
+   * scoring, which is simply wrong — so the column says which season it is.
+   */
+  const carryover = meta.statsSeason === 'PREVIOUS';
+  const seasonSuffix = carryover ? ` ${meta.statsSeasonLabel ?? 'last season'}` : '';
+
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState<Position | 'ALL'>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('epNext');
@@ -108,8 +116,10 @@ export function PlayerTable({ players }: { players: Player[] }) {
               <th className="px-3 py-2 font-black">Pos</th>
               <th className="px-3 py-2 text-right font-black">Price</th>
               <th className="px-3 py-2 text-right font-black">xP</th>
-              <th className="px-3 py-2 text-right font-black">Pts</th>
-              <th className="px-3 py-2 text-right font-black">xGI/90</th>
+              <th className="px-3 py-2 text-right font-black" title={carryover ? `Totals carried over from ${meta.statsSeasonLabel ?? 'last season'} — FPL resets them when the season starts` : undefined}>
+                Pts{seasonSuffix}
+              </th>
+              <th className="px-3 py-2 text-right font-black">xGI/90{seasonSuffix}</th>
               <th className="px-3 py-2 text-right font-black">Own %</th>
               <th className="px-3 py-2 font-black">Status</th>
             </tr>
@@ -151,6 +161,13 @@ export function PlayerTable({ players }: { players: Player[] }) {
 
       <p className="text-[10px] text-slate-600">
         Showing {filtered.length} of {players.length} players.
+        {carryover && (
+          <>
+            {' '}
+            Points and per-90 figures are {meta.statsSeasonLabel ?? 'last season'} totals — FPL
+            carries them until the new season starts. xP is for the upcoming gameweek.
+          </>
+        )}
       </p>
     </div>
   );

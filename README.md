@@ -32,13 +32,43 @@ Two rules the codebase enforces:
 | Real FPL data ingest (players, teams, fixtures, gameweeks) | ✅ Done |
 | Schema validation + drift tests against recorded live responses | ✅ Done |
 | Real 20-team fixture difficulty matrix, with blank/double detection | ✅ Done |
-| Alert engine: availability (injury/suspension/departure) + price-change risk | ✅ Done |
+| Manual squad builder — live budget, quotas and club limit | ✅ Done |
+| Pitch view — real formation, legal-only substitutions, captaincy | ✅ Done |
+| Squad points, value, bank and form tracking | ✅ Done |
+| Squad-scoped alerts: availability, captaincy, blank/double GW, form, fixtures, price | ✅ Done |
 | Cloud Functions: scheduled ingest, Firestore rules, squad import | ✅ Written, **not yet deployed** |
-| Manual squad builder + team-id import UI | ⛔ Next (see Roadmap) |
-| Expected-points model, optimiser, multi-GW planner | ⛔ Not started |
+| Team-id import UI | ⛔ Needs the backend deployed (CORS) |
+| Expected-points model of our own, optimiser, multi-GW planner | ⛔ Not started |
 | LLM narration of alerts | ⛔ Not started |
 
-**42 tests passing.** Everything above marked done is verified against real, recorded API responses.
+**99 tests passing.** Everything above marked done is verified against real, recorded API responses.
+
+### The assistant works from your actual squad
+
+Recommendations are scoped to the 15 players you own — that is the point of the thing. Without a
+squad it falls back to a most-owned watchlist and says so in the header.
+
+Rules currently implemented, each citing the raw API field it fired on:
+
+| Rule | Fires when | Live pre-season? |
+|---|---|---|
+| Availability | A squad player is injured, suspended or has left | ✅ Yes |
+| Captaincy | The armband is not on your best projected scorer | ✅ Yes |
+| Blank / double GW | A squad player's club has 0 or 2+ fixtures in a gameweek | ✅ Yes |
+| Fixture swing | A squad player's club enters a notably hard or easy run | ✅ Yes |
+| Form slump | A player's form drops well below their own scoring rate | ⏸ Needs a played GW |
+| Price change | Net transfer momentum crosses the rise/fall threshold | ⏸ Resets to 0 pre-season |
+
+The last two produce nothing right now, correctly — FPL zeroes `form` and the transfer counters
+before the season starts. They are not broken; there is genuinely no signal yet.
+
+### A trap worth knowing about
+
+Before the season starts, `bootstrap-static` still carries **last season's** `total_points`,
+`minutes`, `starts` and `points_per_game`. On 2026-08-13 Raya showed 162 points and 3,330 minutes —
+exactly his 2025/26 row. Presenting those as current-season figures is silently wrong, so the app
+derives a `statsSeason` flag and labels the columns accordingly. `event_points` and `form` are
+correctly zeroed in that window and are safe either way.
 
 ---
 
@@ -85,6 +115,7 @@ Both paths run **the same** ingest and transform code, so they cannot drift apar
 |---|---|
 | `shared/types.ts` | The contract between backend and SPA. Single source of truth. |
 | `shared/model/alerts.ts` | The alert rules engine. Pure, deterministic, no I/O. |
+| `shared/model/squad.ts` | Squad rules, formation, legal swaps, scoring, auto-fill. |
 | `functions/src/fpl/endpoints.ts` | Every FPL endpoint we use, documented. |
 | `functions/src/fpl/schemas.ts` | Zod schemas — the trust boundary against API drift. |
 | `functions/src/fpl/client.ts` | Our own API client: retry, backoff, timeout, validation. |
@@ -150,14 +181,17 @@ Then call the `ingestNow` callable once to populate Firestore rather than waitin
 
 ## Roadmap
 
-1. **Squad ingress** — manual builder (real budget, position quotas and 3-per-club limit, all read
-   from live `game_settings`), plus team-id import once deadlines start passing.
-2. **Expected points model** — minutes probability × fixture-adjusted per-90 returns + clean-sheet
-   and defensive-contribution terms, blending last season's `history_past` into current form.
-   Baseline it against FPL's own `ep_next`; if it can't beat that, say so.
-3. **More alert rules** — form slump, fixture swing, blank/double gameweek, captaincy, chip windows.
-4. **Deadline delivery** — push/email at T-24h and T-2h. This is what makes it a habit.
-5. **LLM narration** — Gemini rewrites alert prose only, never the numbers.
+1. **Expected points model of our own** — minutes probability × fixture-adjusted per-90 returns +
+   clean-sheet and defensive-contribution terms, blending last season's `history_past` into current
+   form. Everything currently labelled xP is FPL's own `ep_next`, which is crude (dozens of players
+   tied on exactly 4.0 pre-season). Baseline against it; if we can't beat it, say so.
+2. **Team-id import** — needs the Cloud Function deployed, since the FPL API sends no CORS headers.
+   Only useful after a deadline has passed; the manual builder covers pre-season.
+3. **Transfer optimiser** — best legal transfer(s) for the budget, replacing the current
+   single-swap suggestion.
+4. **Chip planner** — using the real two-halves chip structure (2× of each, GW1-19 and GW20-38).
+5. **Deadline delivery** — push/email at T-24h and T-2h. This is what makes it a habit.
+6. **LLM narration** — Gemini rewrites alert prose only, never the numbers.
 
 ---
 

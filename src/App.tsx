@@ -1,41 +1,50 @@
 /**
  * App shell.
  *
- * The inbox is the landing tab, deliberately: the product is an assistant that
- * tells you what matters before the deadline, not a dashboard you have to
- * remember to visit. The player pool and fixture matrix are supporting evidence.
+ * The assistant reasons about YOUR squad: alerts, captaincy and fixture
+ * warnings are all scoped to the 15 players you actually own. Without a squad
+ * it falls back to a most-owned watchlist, and says so.
  *
- * There is no hardcoded football data anywhere in this file. Everything below
- * is rendered from the live snapshot in public/data/.
+ * There is no hardcoded football data in this file. Everything is rendered from
+ * the live snapshot in public/data/.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Inbox, Loader2, ServerCrash, Shield, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarDays, Inbox, Loader2, PenSquare, ServerCrash, Shield, Users } from 'lucide-react';
 
 import { loadSnapshot, type Snapshot } from './data/snapshot';
+import { clearSquad, loadHistory, loadSquad, saveSquad } from './data/squadStore';
 import { generateAlerts } from '../shared/model/alerts';
+import {
+  applySwap,
+  buildSquadFromIds,
+  costSquad,
+  deriveFormation,
+  resolvePicks,
+  startersOf,
+} from '../shared/model/squad';
+import type { Squad } from '../shared/types';
 import { AlertInbox } from './components/AlertInbox';
 import { FdrMatrix } from './components/FdrMatrix';
+import { Pitch } from './components/Pitch';
 import { PlayerTable } from './components/PlayerTable';
+import { SquadBuilder } from './components/SquadBuilder';
+import { SquadSummary } from './components/SquadSummary';
 import { timeUntil } from './lib/format';
 
-type Tab = 'inbox' | 'players' | 'fixtures';
+type Tab = 'inbox' | 'squad' | 'players' | 'fixtures';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Inbox }> = [
   { id: 'inbox', label: 'Assistant Manager', icon: Inbox },
+  { id: 'squad', label: 'My Squad', icon: Shield },
   { id: 'players', label: 'Player Pool', icon: Users },
   { id: 'fixtures', label: 'Fixture Difficulty', icon: CalendarDays },
 ];
 
 /**
- * Until a user squad exists (Phase 2: manual builder + entry-id import), we
- * watch the most-owned players as a proxy for "players you probably own".
- * The alert engine takes a list of ids either way, so this is the same code
- * path a real squad will use.
- *
- * 200 is chosen from the data rather than by feel: it covers every player owned
- * by roughly 1% of managers or more. Narrower windows (the top 60) contain no
- * flagged players at all right now, which is a true but useless inbox.
+ * Fallback watchlist when no squad exists yet: the most-owned players, as a
+ * proxy for "players you probably own". 200 covers roughly everyone owned by
+ * 1% of managers or more — narrower windows contain no flagged players at all.
  */
 const WATCHLIST_SIZE = 200;
 
@@ -43,13 +52,18 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inbox');
+  const [squad, setSquad] = useState<Squad | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [history] = useState(() => loadHistory());
 
   useEffect(() => {
     let cancelled = false;
 
     loadSnapshot()
       .then((data) => {
-        if (!cancelled) setSnapshot(data);
+        if (cancelled) return;
+        setSnapshot(data);
+        setSquad(loadSquad());
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
@@ -60,6 +74,11 @@ export default function App() {
     };
   }, []);
 
+  const persist = useCallback((next: Squad) => {
+    setSquad(next);
+    saveSquad(next);
+  }, []);
+
   const playersById = useMemo(
     () => new Map((snapshot?.players ?? []).map((player) => [player.id, player])),
     [snapshot],
@@ -68,10 +87,12 @@ export default function App() {
   const alerts = useMemo(() => {
     if (!snapshot) return [];
 
-    const watchedIds = [...snapshot.players]
-      .sort((a, b) => b.selectedByPercent - a.selectedByPercent)
-      .slice(0, WATCHLIST_SIZE)
-      .map((player) => player.id);
+    const watchedIds = squad
+      ? squad.picks.map((pick) => pick.playerId)
+      : [...snapshot.players]
+          .sort((a, b) => b.selectedByPercent - a.selectedByPercent)
+          .slice(0, WATCHLIST_SIZE)
+          .map((player) => player.id);
 
     return generateAlerts({
       players: snapshot.players,
@@ -79,8 +100,60 @@ export default function App() {
       event: snapshot.meta.nextEvent ?? snapshot.meta.currentEvent ?? 1,
       totalManagers: snapshot.meta.totalPlayers,
       now: new Date().toISOString(),
+      fdr: snapshot.fdr.rows,
+      statsAreCarryover: snapshot.meta.statsSeason === 'PREVIOUS',
+      ...(squad ? { squad: { picks: squad.picks, captainId: squad.captainId } } : {}),
     });
-  }, [snapshot]);
+  }, [snapshot, squad]);
+
+  const handleSwap = useCallback(
+    (starterId: number, benchId: number) => {
+      if (!squad || !snapshot) return;
+      const picks = applySwap(starterId, benchId, squad.picks);
+      if (!picks) return;
+
+      persist({
+        ...squad,
+        picks,
+        formation: deriveFormation(startersOf(resolvePicks(picks, snapshot.players))),
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [squad, snapshot, persist],
+  );
+
+  const handleSetCaptain = useCallback(
+    (playerId: number) => {
+      if (!squad) return;
+      // Promote the outgoing captain to vice so the pair is never the same player.
+      const viceCaptainId = playerId === squad.viceCaptainId ? squad.captainId : squad.viceCaptainId;
+
+      persist({
+        ...squad,
+        captainId: playerId,
+        viceCaptainId,
+        picks: squad.picks.map((pick) => ({
+          ...pick,
+          isCaptain: pick.playerId === playerId,
+          isViceCaptain: pick.playerId === viceCaptainId,
+        })),
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [squad, persist],
+  );
+
+  const handleBuilt = useCallback(
+    (playerIds: number[]) => {
+      if (!snapshot) return;
+      const built = buildSquadFromIds(playerIds, snapshot.players, snapshot.meta.rules);
+      if (!built) return;
+      persist(built);
+      setBuilding(false);
+      setTab('squad');
+    },
+    [snapshot, persist],
+  );
 
   if (error) {
     return (
@@ -105,6 +178,8 @@ export default function App() {
 
   const { meta } = snapshot;
   const criticalCount = alerts.filter((alert) => alert.severity === 'CRITICAL').length;
+  const costing = squad ? costSquad(squad.picks, snapshot.players, meta.rules) : null;
+  const showLivePoints = meta.statsSeason === 'CURRENT' && meta.currentEvent !== null;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
@@ -124,16 +199,30 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-2">
-          <Stat label="Players" value={String(snapshot.players.length)} />
-          <Divider />
-          <Stat label="Managers" value={`${(meta.totalPlayers / 1_000_000).toFixed(1)}m`} />
-          <Divider />
-          <Stat
-            label="Needs attention"
-            value={String(criticalCount)}
-            tone={criticalCount > 0 ? 'alert' : 'ok'}
-          />
+        <div className="flex items-center gap-3">
+          {squad && (
+            <button
+              type="button"
+              onClick={() => {
+                clearSquad();
+                setSquad(null);
+                setBuilding(true);
+                setTab('squad');
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-bold text-slate-400 transition-colors hover:border-emerald-500/50 hover:text-emerald-300"
+            >
+              <PenSquare className="h-3.5 w-3.5" /> Rebuild squad
+            </button>
+          )}
+          <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-2">
+            <Stat label="Players" value={String(snapshot.players.length)} />
+            <Divider />
+            <Stat
+              label="Needs attention"
+              value={String(criticalCount)}
+              tone={criticalCount > 0 ? 'alert' : 'ok'}
+            />
+          </div>
         </div>
       </header>
 
@@ -143,7 +232,7 @@ export default function App() {
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`flex items-center gap-2 border-b-2 py-3 text-xs font-bold transition-colors ${
+            className={`flex items-center gap-2 whitespace-nowrap border-b-2 py-3 text-xs font-bold transition-colors ${
               tab === id
                 ? 'border-emerald-400 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -165,10 +254,43 @@ export default function App() {
           <AlertInbox
             alerts={alerts}
             playersById={playersById}
-            watchlistLabel={`top ${WATCHLIST_SIZE} owned`}
+            watchlistLabel={squad ? 'your squad' : `top ${WATCHLIST_SIZE} owned`}
           />
         )}
-        {tab === 'players' && <PlayerTable players={snapshot.players} />}
+
+        {tab === 'squad' &&
+          (building || !squad ? (
+            <SquadBuilder
+              players={snapshot.players}
+              rules={meta.rules}
+              onComplete={handleBuilt}
+              onCancel={squad ? () => setBuilding(false) : null}
+            />
+          ) : (
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
+              <SquadSummary
+                picks={squad.picks}
+                players={snapshot.players}
+                meta={meta}
+                history={history}
+                squadValue={costing!.squadValue}
+                bank={costing!.bank}
+              />
+              <Pitch
+                picks={squad.picks}
+                players={snapshot.players}
+                rules={meta.rules}
+                captainId={squad.captainId}
+                viceCaptainId={squad.viceCaptainId}
+                showLivePoints={showLivePoints}
+                onSwap={handleSwap}
+                onSetCaptain={handleSetCaptain}
+              />
+            </div>
+          ))}
+
+        {tab === 'players' && <PlayerTable players={snapshot.players} meta={meta} />}
+
         {tab === 'fixtures' && (
           <FdrMatrix
             rows={snapshot.fdr.rows}

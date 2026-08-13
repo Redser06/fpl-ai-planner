@@ -188,7 +188,25 @@ export interface SquadRules {
   positionMaxPlay: Record<Position, number>;
 }
 
+/**
+ * Which season the per-player stat block actually describes.
+ *
+ * This matters more than it looks. Before the season starts, FPL's
+ * `bootstrap-static` still carries LAST season's `total_points`, `minutes`,
+ * `starts` and `points_per_game` — verified on 2026-08-13, where Raya showed
+ * 162 points and 3,330 minutes, exactly matching his 2025/26 `history_past`
+ * row. Presenting those as current-season figures is silently wrong.
+ *
+ * `event_points` and `form` are correctly zeroed in that window, so they are
+ * safe to show either way.
+ */
+export type StatsSeason = 'PREVIOUS' | 'CURRENT';
+
 export interface SeasonMeta {
+  /** Whether player stat totals describe last season or this one. */
+  statsSeason: StatsSeason;
+  /** Human label for the season the stats describe, e.g. "2025/26". */
+  statsSeasonLabel: string | null;
   /** Gameweek currently in progress, if any. */
   currentEvent: number | null;
   /** Next gameweek to be played — what we plan against. */
