@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// Security model
+// --------------
+// Reference data (players, teams, fixtures, FDR, meta) is public FPL data. It is
+// world-readable and writable ONLY by the ingest Cloud Functions, which use the
+// Admin SDK and therefore bypass these rules entirely. No client path can write it.
+//
+// User data (squads, alerts) is readable and writable only by its owner. Alerts
+// are generated server-side, so clients may read but never write them.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Public reference data: read-only to everyone, never client-writable.
+    match /datasets/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---- A user's own squad.
+    match /squads/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid) && isValidSquad();
+    }
+
+    // ---- Alerts are produced by the rules engine server-side.
+    match /alerts/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+
+      match /items/{alertId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    // ---- Anything not explicitly matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Shape and bounds checks, so a compromised or buggy client cannot write a
+    // squad that the rest of the system would have to defend against.
+    function isValidSquad() {
+      let squad = request.resource.data;
+      return squad.keys().hasAll(['picks', 'captainId', 'viceCaptainId', 'bank', 'squadValue', 'source'])
+        && squad.picks is list
+        && squad.picks.size() == 15
+        && squad.bank is number
+        && squad.bank >= 0
+        && squad.squadValue is number
+        && squad.squadValue >= 0
+        && squad.source in ['MANUAL', 'IMPORTED'];
+    }
+  }
+}
