@@ -15,7 +15,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bootstrapSchema,
-  elementSummarySchema,
   entrySchema,
   fixturesSchema,
 } from '../src/fpl/schemas';
@@ -105,22 +104,6 @@ describe('fixtures', () => {
     for (const fixture of fixtures) {
       expect(fixture.team_h).not.toBe(fixture.team_a);
     }
-  });
-});
-
-describe('element-summary', () => {
-  const raw = load('element-summary');
-
-  it('parses the full live response', () => {
-    expect(elementSummarySchema.safeParse(raw).success).toBe(true);
-  });
-
-  it('carries prior-season history, which is what solves the cold start', () => {
-    const summary = elementSummarySchema.parse(raw);
-    expect(summary.history_past.length).toBeGreaterThan(0);
-    const lastSeason = summary.history_past.at(-1);
-    expect(lastSeason?.season_name).toMatch(/^\d{4}\/\d{2}$/);
-    expect(typeof lastSeason?.expected_goals).toBe('number');
   });
 });
 

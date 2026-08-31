@@ -410,8 +410,102 @@ export function buildSquadFromIds(
  * best-first greedy fails at — it spends the budget on four midfielders and
  * then cannot afford three forwards.
  */
-export function autoFillSquad(
+/**
+ * Applies a one-for-one transfer: replaces one squad pick with a new player in
+ * the same slot, recomputes cost with the bank carried over, and runs the full
+ * rulebook. Returns the updated squad, or null when the result would be
+ * illegal (position quota, club limit, over real budget) or the inputs bogus.
+ *
+ * This is the "one click" behind each alert's fix button, and why alerts may
+ * only suggest transfers this function would accept.
+ */
+export function applyTransfer(
+  squad: Squad,
+  outId: number,
+  inId: number,
   players: readonly Player[],
+  rules: SquadRules,
+): Squad | null {
+  const outIndex = squad.picks.findIndex((pick) => pick.playerId === outId);
+  if (outIndex === -1) return null;
+
+  const incoming = players.find((player) => player.id === inId);
+  const outgoing = players.find((player) => player.id === outId);
+  if (!incoming || !outgoing) return null;
+  // Same-slot replacement; a position change is a rebuild, not a transfer.
+  if (incoming.position !== outgoing.position) return null;
+  if (squad.picks.some((pick) => pick.playerId === inId)) return null;
+
+  const picks: SquadPick[] = squad.picks.map((pick, index) =>
+    index === outIndex
+      ? // The incoming player inherits the slot but never the armband; the
+        // captain re-assignment below handles the case where the outgoing
+        // player was wearing it. (inId cannot already be captain — duplicates
+        // were rejected above.)
+        { playerId: inId, slot: pick.slot, isCaptain: false, isViceCaptain: false }
+      : pick,
+  );
+
+  let captainId = squad.captainId;
+  let viceCaptainId = squad.viceCaptainId;
+
+  if (outId === captainId) {
+    // The armband passes to the vice, and a fresh vice is picked below.
+    captainId = viceCaptainId;
+    viceCaptainId = 0;
+  }
+  if (viceCaptainId === 0 || viceCaptainId === captainId) {
+    const starters = new Set(
+      startersOf(resolvePicks(picks, players)).map((entry) => entry.player.id),
+    );
+    viceCaptainId =
+      [...starters].find((id) => id !== captainId) ??
+      picks.find((pick) => pick.playerId !== captainId)?.playerId ??
+      0;
+  }
+  if (outId === viceCaptainId && viceCaptainId !== captainId) {
+    // The sold player was vice but not captain; pick a fresh vice too.
+    viceCaptainId = 0;
+    const starters = new Set(
+      startersOf(resolvePicks(picks, players)).map((entry) => entry.player.id),
+    );
+    viceCaptainId =
+      [...starters].find((id) => id !== captainId) ??
+      picks.find((pick) => pick.playerId !== captainId)?.playerId ??
+      0;
+  }
+
+  const finalPicks = picks.map((pick) => ({
+    ...pick,
+    isCaptain: pick.playerId === captainId,
+    isViceCaptain: pick.playerId === viceCaptainId,
+  }));
+
+  // Money is carried over, not reset. A legal transfer keeps squad value
+  // within the user's actual bank: the constraint is
+  //   newSquadValue <= oldSquadValue + bank
+  // which, applied to the prices, is simply  bank + outgoing >= incoming.
+  const resolved = resolvePicks(finalPicks, players);
+  const squadValue = round1(resolved.reduce((total, entry) => total + entry.player.price, 0));
+  const bank = round1(squad.bank + outgoing.price - incoming.price);
+
+  if (bank < -1e-9 && squad.picks.length === rules.squadSize) return null;
+
+  if (validateSquad(finalPicks, players, rules).length > 0) return null;
+
+  return {
+    ...squad,
+    picks: finalPicks,
+    formation: deriveFormation(startersOf(resolved)),
+    captainId,
+    viceCaptainId,
+    bank,
+    squadValue,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function autoFillSquad(  players: readonly Player[],
   rules: SquadRules,
   options: { seed?: readonly number[]; maxUpgrades?: number } = {},
 ): number[] | null {

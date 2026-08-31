@@ -159,50 +159,6 @@ export const fixtureSchema = z.object({
 
 export const fixturesSchema = z.array(fixtureSchema);
 
-/** One prior season's totals, from element-summary. Solves the cold-start problem. */
-export const historyPastSchema = z.object({
-  season_name: z.string(),
-  element_code: z.number(),
-  start_cost: z.number(),
-  end_cost: z.number(),
-  total_points: z.number(),
-  minutes: z.number(),
-  goals_scored: z.number(),
-  assists: z.number(),
-  clean_sheets: z.number(),
-  goals_conceded: z.number(),
-  bonus: z.number(),
-  bps: z.number(),
-  starts: z.number(),
-  expected_goals: numericString,
-  expected_assists: numericString,
-  expected_goal_involvements: numericString,
-  expected_goals_conceded: numericString,
-  defensive_contribution: z.number(),
-});
-
-/** One gameweek of this season, from element-summary. */
-export const historyEntrySchema = z.object({
-  element: z.number(),
-  round: z.number(),
-  minutes: z.number(),
-  total_points: z.number(),
-  was_home: z.boolean(),
-  opponent_team: z.number(),
-  expected_goals: numericString,
-  expected_assists: numericString,
-  expected_goal_involvements: numericString,
-  expected_goals_conceded: numericString,
-  defensive_contribution: z.number(),
-  bps: z.number(),
-  value: z.number(),
-});
-
-export const elementSummarySchema = z.object({
-  history: z.array(historyEntrySchema),
-  history_past: z.array(historyPastSchema),
-});
-
 export const entrySchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -237,7 +193,5 @@ export type RawElement = z.infer<typeof elementSchema>;
 export type RawTeam = z.infer<typeof teamSchema>;
 export type RawFixture = z.infer<typeof fixtureSchema>;
 export type RawEvent = z.infer<typeof eventSchema>;
-export type RawElementSummary = z.infer<typeof elementSummarySchema>;
 export type RawEntry = z.infer<typeof entrySchema>;
 export type RawEntryPicks = z.infer<typeof entryPicksSchema>;
-export type RawHistoryPast = z.infer<typeof historyPastSchema>;

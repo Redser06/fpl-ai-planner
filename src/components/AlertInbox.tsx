@@ -32,13 +32,17 @@ function AlertIcon({ type }: { type: Alert['type'] }) {
 function AlertCard({
   alert,
   playersById,
+  onApply,
 }: {
   alert: Alert;
   playersById: Map<number, Player>;
+  /** Null when there is no squad to apply fixes to — then no button renders. */
+  onApply: ((alert: Alert) => void) | null;
 }) {
   const [showEvidence, setShowEvidence] = useState(false);
   const replacement = alert.replacementId ? playersById.get(alert.replacementId) : null;
   const target = alert.targetId ? playersById.get(alert.targetId) : null;
+  const actionable = onApply !== null && alert.actionLabel !== null && replacement !== null;
 
   return (
     <div className={`rounded-xl border border-slate-800 border-l-4 p-4 ${SEVERITY_STYLES[alert.severity]}`}>
@@ -59,11 +63,8 @@ function AlertCard({
         </span>
       </div>
 
-      {replacement && target && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
-          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-            Suggested
-          </span>
+      {actionable && target && replacement && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
           <span className="text-xs text-slate-300">
             <span className="font-bold text-red-300">{target.webName}</span>
             <span className="text-slate-600"> → </span>
@@ -73,6 +74,13 @@ function AlertCard({
             {formatPrice(replacement.price)} · {replacement.epNext.toFixed(1)} xP ·{' '}
             {replacement.teamShort}
           </span>
+          <button
+            type="button"
+            onClick={() => onApply(alert)}
+            className="rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-black text-slate-950 transition-colors hover:bg-emerald-400"
+          >
+            {alert.actionLabel}
+          </button>
         </div>
       )}
 
@@ -109,10 +117,12 @@ export function AlertInbox({
   alerts,
   playersById,
   watchlistLabel,
+  onApply,
 }: {
   alerts: Alert[];
   playersById: Map<number, Player>;
   watchlistLabel: string;
+  onApply: ((alert: Alert) => void) | null;
 }) {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -140,7 +150,7 @@ export function AlertInbox({
       ) : (
         <div className="flex flex-col gap-3">
           {alerts.map((alert) => (
-            <AlertCard key={alert.id} alert={alert} playersById={playersById} />
+            <AlertCard key={alert.id} alert={alert} playersById={playersById} onApply={onApply} />
           ))}
         </div>
       )}

@@ -44,8 +44,6 @@ async function main(): Promise<void> {
 
   await record('bootstrap', endpoints.bootstrap());
   await record('fixtures', endpoints.fixtures());
-  // Player 1 is a stable, always-present element with 5 seasons of history.
-  await record('element-summary', endpoints.elementSummary(1));
   await record('entry', endpoints.entry(1));
   // Expected to 404 before the gameweek deadline — that is the point.
   await record('entry-picks', endpoints.entryPicks(1, 1));

@@ -18,8 +18,8 @@
  * over these objects — it may never produce a number or invent an alert.
  */
 
-import type { Alert, FdrRow, Player, SquadPick } from '../types';
-import { compareForCaptaincy, resolvePicks, startersOf } from './squad';
+import type { Alert, FdrRow, Player, SquadPick, SquadRules } from '../types';
+import { compareForCaptaincy, costSquad, resolvePicks, startersOf } from './squad';
 
 /**
  * Net transfer momentum (as a fraction of all managers) beyond which a price
@@ -54,13 +54,21 @@ export interface AlertContext {
   /** Injected so output is deterministic and testable. */
   now: string;
 
+  /** Live squad rules — replacement legality is checked against these. */
+  rules: SquadRules;
+
   /**
    * The user's actual squad. When present, the assistant can reason about
-   * things that only make sense for a real team — most importantly captaincy.
+   * things that only make sense for a real team — most importantly captaincy,
+   * and replacements that respect the bank and the club limit.
    */
   squad?: {
     picks: readonly SquadPick[];
     captainId: number;
+    /** Money in the bank, in millions — caps what a replacement can cost. */
+    bank?: number;
+    /** Players owned per club, used to enforce the per-club limit. */
+    clubCounts?: ReadonlyMap<number, number>;
   };
 
   /** Fixture difficulty rows, keyed lookup built internally. Enables fixture swings. */
@@ -74,34 +82,94 @@ export interface AlertContext {
 }
 
 /**
- * Finds the best available replacement for a player: same position, within a
- * small price band, ranked by expected points.
+ * Finds the best available replacement for a player: same position, affordable
+ * within the squad's bank, and legal under the per-club limit — ranked by
+ * expected points.
  *
  * This is what the prototype's three hardcoded "AI OPTIMIZER" cards pretended
- * to do. It is deliberately simple and explainable — a full optimiser over
- * budget and squad legality is Phase 3.
+ * to do. It is deliberately simple and explainable — a full optimiser is a
+ * future phase. What it must NEVER do is recommend an illegal transfer, which
+ * the previous version did happily by ignoring both the bank and the club cap.
  */
+export interface ReplacementContext {
+  /** Money in the bank, in millions. */
+  bank: number;
+  /** Players owned per club (including the outgoing player). */
+  clubCounts: ReadonlyMap<number, number>;
+  /** Max players per club, from the live rules. */
+  teamLimit: number;
+}
+
 export function findReplacement(
   player: Player,
   players: readonly Player[],
-  priceBand = 0.5,
+  context: ReplacementContext,
 ): Player | null {
-  const candidates = players.filter(
-    (candidate) =>
-      candidate.id !== player.id &&
-      candidate.position === player.position &&
-      candidate.availability === 'AVAILABLE' &&
-      candidate.price <= player.price + priceBand &&
-      // Require some evidence of playing time or a real projection, so we never
-      // recommend a bench-warmer purely because he is cheap.
-      (candidate.epNext > 0 || candidate.minutes > 0),
-  );
+  // The +0.3 slack covers a likely price rise between alert and action; an
+  // honestly-unaffordable suggestion is still better than none, so anything
+  // within 0.3 of budget is allowed to surface.
+  const maxPrice = player.price + context.bank + 0.3;
+
+  const candidates = players.filter((candidate) => {
+    if (candidate.id === player.id) return false;
+    if (candidate.position !== player.position) return false;
+    if (candidate.availability !== 'AVAILABLE') return false;
+    if (candidate.price > maxPrice) return false;
+
+    // Club cap: the outgoing player's club frees a slot only if the candidate
+    // plays for the same club (a same-club swap is always legal).
+    const currentCount = context.clubCounts.get(candidate.teamId) ?? 0;
+    const afterCount = currentCount - (candidate.teamId === player.teamId ? 1 : 0);
+    if (afterCount >= context.teamLimit) return false;
+
+    // Require some evidence of playing time or a real projection, so we never
+    // recommend a bench-warmer purely because he is cheap.
+    return candidate.epNext > 0 || candidate.minutes > 0;
+  });
 
   if (candidates.length === 0) return null;
 
   return candidates.reduce((best, candidate) =>
     candidate.epNext > best.epNext ? candidate : best,
   );
+}
+
+/** Builds the replacement context for the squad in play, if we have one. */
+function replacementContext(context: AlertContext): ReplacementContext | null {
+  if (!context.squad) return null;
+
+  const clubCounts =
+    context.squad.clubCounts ?? clubCountsFromPicks(context.squad.picks, context.players);
+  const bank =
+    context.squad.bank ?? costSquad(context.squad.picks, context.players, context.rules).bank;
+
+  return { bank, clubCounts, teamLimit: context.rules.teamLimit };
+}
+
+/** Derives per-club ownership counts when the caller did not supply them. */
+function clubCountsFromPicks(
+  picks: readonly SquadPick[],
+  players: readonly Player[],
+): Map<number, number> {
+  const byId = new Map(players.map((player) => [player.id, player]));
+  const counts = new Map<number, number>();
+  for (const pick of picks) {
+    const player = byId.get(pick.playerId);
+    if (!player) continue;
+    counts.set(player.teamId, (counts.get(player.teamId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Resolves a legal replacement for a squad player. Without squad context there
+ * is no bank or club count to check against, so no replacement is offered —
+ * an unsuggestable alert beats a suggestion that would be refused on apply.
+ */
+function replacementFor(player: Player, context: AlertContext): Player | null {
+  const replacementCtx = replacementContext(context);
+  if (!replacementCtx) return null;
+  return findReplacement(player, context.players, replacementCtx);
 }
 
 /**
@@ -127,7 +195,7 @@ function availabilityAlerts(context: AlertContext): Alert[] {
 
     const type: Alert['type'] = player.availability === 'SUSPENDED' ? 'SUSPENSION' : 'INJURY';
 
-    const replacement = findReplacement(player, context.players);
+    const replacement = replacementFor(player, context);
 
     alerts.push({
       id: `availability-${player.id}-${context.event}`,
@@ -269,7 +337,7 @@ function formSlumpAlerts(context: AlertContext): Alert[] {
     if (player.pointsPerGame < FORM_MIN_BASELINE) continue;
     if (player.form >= player.pointsPerGame * FORM_SLUMP_RATIO) continue;
 
-    const replacement = findReplacement(player, context.players);
+    const replacement = replacementFor(player, context);
 
     alerts.push({
       id: `form-${player.id}-${context.event}`,

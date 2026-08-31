@@ -9,28 +9,47 @@
  * the live snapshot in public/data/.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Inbox, Loader2, PenSquare, ServerCrash, Shield, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarDays, CloudDownload, Inbox, Loader2, PenSquare, ServerCrash, Shield, Users } from 'lucide-react';
 
 import { loadSnapshot, type Snapshot } from './data/snapshot';
-import { clearSquad, loadHistory, loadSquad, saveSquad } from './data/squadStore';
+import {
+  clearSquad,
+  loadHistory,
+  loadSquad,
+  saveSquad,
+} from './data/squadStore';
 import { generateAlerts } from '../shared/model/alerts';
 import {
   applySwap,
+  applyTransfer,
   buildSquadFromIds,
   costSquad,
   deriveFormation,
   resolvePicks,
   startersOf,
 } from '../shared/model/squad';
-import type { Squad } from '../shared/types';
+import type { Alert, Player, Squad } from '../shared/types';
 import { AlertInbox } from './components/AlertInbox';
 import { FdrMatrix } from './components/FdrMatrix';
+import { ImportSquad } from './components/ImportSquad';
 import { Pitch } from './components/Pitch';
 import { PlayerTable } from './components/PlayerTable';
 import { SquadBuilder } from './components/SquadBuilder';
 import { SquadSummary } from './components/SquadSummary';
 import { timeUntil } from './lib/format';
+
+/** Per-club ownership counts, passed to the alert engine for legality checks. */
+function clubCountsOf(picks: Squad['picks'], players: Player[]): Map<number, number> {
+  const byId = new Map(players.map((player) => [player.id, player]));
+  const counts = new Map<number, number>();
+  for (const pick of picks) {
+    const player = byId.get(pick.playerId);
+    if (!player) continue;
+    counts.set(player.teamId, (counts.get(player.teamId) ?? 0) + 1);
+  }
+  return counts;
+}
 
 type Tab = 'inbox' | 'squad' | 'players' | 'fixtures';
 
@@ -54,6 +73,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('inbox');
   const [squad, setSquad] = useState<Squad | null>(null);
   const [building, setBuilding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [history] = useState(() => loadHistory());
 
   useEffect(() => {
@@ -63,7 +83,11 @@ export default function App() {
       .then((data) => {
         if (cancelled) return;
         setSnapshot(data);
-        setSquad(loadSquad());
+        const existing = loadSquad();
+        setSquad(existing);
+        // First run with no squad: prompt for an import rather than dropping
+        // the user straight into the manual picker.
+        if (!existing) openImportRef.current();
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
@@ -100,9 +124,19 @@ export default function App() {
       event: snapshot.meta.nextEvent ?? snapshot.meta.currentEvent ?? 1,
       totalManagers: snapshot.meta.totalPlayers,
       now: new Date().toISOString(),
+      rules: snapshot.meta.rules,
       fdr: snapshot.fdr.rows,
       statsAreCarryover: snapshot.meta.statsSeason === 'PREVIOUS',
-      ...(squad ? { squad: { picks: squad.picks, captainId: squad.captainId } } : {}),
+      ...(squad
+        ? {
+            squad: {
+              picks: squad.picks,
+              captainId: squad.captainId,
+              bank: squad.bank,
+              clubCounts: clubCountsOf(squad.picks, snapshot.players),
+            },
+          }
+        : {}),
     });
   }, [snapshot, squad]);
 
@@ -150,10 +184,69 @@ export default function App() {
       if (!built) return;
       persist(built);
       setBuilding(false);
+      setImporting(false);
       setTab('squad');
     },
     [snapshot, persist],
   );
+
+  /**
+   * The one-click fix behind each alert.
+   *
+   * Captaincy alerts route to the existing armband handler; everything else is
+   * a like-for-like transfer through applyTransfer, which re-runs the full
+   * rulebook — so a button only ever lands a legal move. Alerts without both
+   * an actionLabel and a replacementId never render a button at all.
+   */
+  const handleApplyAlert = useCallback(
+    (alert: Alert) => {
+      if (!squad || !snapshot) return;
+      if (alert.targetId === null || alert.replacementId === null) return;
+
+      if (alert.type === 'CAPTAINCY') {
+        handleSetCaptain(alert.replacementId);
+        setTab('squad');
+        return;
+      }
+
+      const transferred = applyTransfer(
+        squad,
+        alert.targetId,
+        alert.replacementId,
+        snapshot.players,
+        snapshot.meta.rules,
+      );
+      if (!transferred) return;
+      persist(transferred);
+      setTab('squad');
+    },
+    [squad, snapshot, persist, handleSetCaptain],
+  );
+
+  const handleImported = useCallback(
+    (imported: Squad) => {
+      persist(imported);
+      setBuilding(false);
+      setImporting(false);
+      setTab('squad');
+    },
+    [persist],
+  );
+
+  const openImport = useCallback(() => {
+    setBuilding(false);
+    setImporting(true);
+    setTab('squad');
+  }, []);
+
+  const openImportRef = useRef(openImport);
+  openImportRef.current = openImport;
+
+  const openManualBuilder = useCallback(() => {
+    setImporting(false);
+    setBuilding(true);
+    setTab('squad');
+  }, []);
 
   if (error) {
     return (
@@ -200,12 +293,21 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={openImport}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-bold text-slate-400 transition-colors hover:border-emerald-500/50 hover:text-emerald-300"
+          >
+            <CloudDownload className="h-3.5 w-3.5" />{' '}
+            {squad?.source === 'IMPORTED' ? 'Re-import squad' : 'Import squad'}
+          </button>
           {squad && (
             <button
               type="button"
               onClick={() => {
                 clearSquad();
                 setSquad(null);
+                setImporting(false);
                 setBuilding(true);
                 setTab('squad');
               }}
@@ -255,11 +357,20 @@ export default function App() {
             alerts={alerts}
             playersById={playersById}
             watchlistLabel={squad ? 'your squad' : `top ${WATCHLIST_SIZE} owned`}
+            onApply={squad ? handleApplyAlert : null}
           />
         )}
 
         {tab === 'squad' &&
-          (building || !squad ? (
+          (importing ? (
+            <div className="py-10">
+              <ImportSquad
+                players={snapshot.players}
+                onImported={handleImported}
+                onManual={openManualBuilder}
+              />
+            </div>
+          ) : building || !squad ? (
             <SquadBuilder
               players={snapshot.players}
               rules={meta.rules}

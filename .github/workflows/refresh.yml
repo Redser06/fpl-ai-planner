@@ -1,0 +1,66 @@
+# Refreshes the public data snapshot and redeploys hosting so the app stays
+# live on prices and injury news with NO backend needed — the static JSON path.
+#
+# Fires four times a day (00:05 / 06:05 / 12:05 / 18:05 UTC): prices change
+# once daily and injury news trickles in, so that is comfortably fresh enough
+# for a personal tool without hammering a free public API.
+
+name: Refresh data and redeploy
+
+on:
+  schedule:
+    - cron: '5 0,6,12,18 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Fail LOUDLY if the deploy credential is missing — a refresh that
+      # silently does nothing is worse than one that fails, because the app
+      # keeps serving stale data while looking healthy.
+      - name: Verify deploy credential is configured
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        run: |
+          if [ -z "$GCP_SERVICE_ACCOUNT_KEY" ]; then
+            echo "::error::The GCP_SERVICE_ACCOUNT_KEY repository secret is not set."
+            echo "::error::Create a service account with the Firebase Hosting Admin role, add its JSON key as the GCP_SERVICE_ACCOUNT_KEY secret, and re-run."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refresh the public data snapshot
+        run: npm run snapshot
+
+      - name: Build the production app
+        run: npm run build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Deploy hosting with the fresh data
+        run: npx firebase-tools deploy --only hosting --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
