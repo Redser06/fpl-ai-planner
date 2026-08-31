@@ -38,12 +38,13 @@ Two rules the codebase enforces:
 | Squad-scoped alerts: availability, captaincy, blank/double GW, form, fixtures, price | ✅ Done |
 | One-click fix on alerts — captaincy and legal transfers, validated against bank and club limit | ✅ Done |
 | Cloud Functions: scheduled ingest, Firestore rules, squad import | ✅ Written, **not yet deployed** |
-| Team-id import UI — `importSquad` callable, honest four-state handling | ✅ Done (needs the backend deployed to respond) |
+| Live squad import — read-only `fetchSquadPublic` proxy (event chosen from FPL's live `current_event`, no CORS proxy) | ✅ Written + verified live against entry 4698335, **needs one function deploy to serve** |
+| Team-id import UI — routes to `importSquad` callable or the proxy, honest four-state handling | ✅ Done (needs a reachable import service to respond) |
 | Data refresh workflow — 4× daily snapshot + hosting redeploy | ✅ Written, runs once the deploy credential is configured |
 | Expected-points model of our own, optimiser, multi-GW planner | ⛔ Not started |
 | LLM narration of alerts | ⛔ Not started |
 
-**114 tests passing.** Everything above marked done is verified against real, recorded API responses.
+**126 tests passing.** Everything above marked done is verified against real, recorded API responses and a live smoke test of the proxy path.
 
 ### The assistant works from your actual squad
 
@@ -123,7 +124,8 @@ Both paths run **the same** ingest and transform code, so they cannot drift apar
 | `functions/src/fpl/client.ts` | Our own API client: retry, backoff, timeout, validation. |
 | `functions/src/ingest/transform.ts` | Raw API → slim projections, and the FDR matrix builder. |
 | `functions/src/ingest/store.ts` | Chunked Firestore writers (quota-aware). |
-| `functions/src/index.ts` | Scheduled ingest + callable squad import. |
+| `functions/src/index.ts` | Scheduled ingest + callable squad import + read-only live squad proxy. |
+| `functions/src/ingest/publicSquad.ts` | Pure core of the live squad proxy (event choice, squad assembly); HTTP shell in index.ts. |
 | `scripts/snapshot.ts` | Static data snapshot for the zero-cost hosting path. |
 | `firestore.rules` | All client writes denied; user data scoped to its owner. |
 
@@ -179,6 +181,10 @@ npx firebase-tools deploy --only functions,firestore:rules,hosting
 
 Then call the `ingestNow` callable once to populate Firestore rather than waiting for the schedule.
 
+Deploying functions also lights up **live squad import**: `fetchSquadPublic` answers at
+`/api/squad?entryId=…` via the hosting rewrite, so importing your team works the moment this pass
+lands — no client change required.
+
 ---
 
 ## Roadmap
@@ -187,8 +193,12 @@ Then call the `ingestNow` callable once to populate Firestore rather than waitin
    clean-sheet and defensive-contribution terms, blending last season's `history_past` into current
    form. Everything currently labelled xP is FPL's own `ep_next`, which is crude (dozens of players
    tied on exactly 4.0 pre-season). Baseline against it; if we can't beat it, say so.
-2. **Team-id import** — needs the Cloud Function deployed, since the FPL API sends no CORS headers.
-   Only useful after a deadline has passed; the manual builder covers pre-season.
+2. **Team-id import** — served two ways: the `importSquad` callable (persists the squad) and a
+   read-only HTTP proxy `fetchSquadPublic` (no auth, no write) reached via the `/api/squad`
+   hosting rewrite. The client prefers the callable when a Firebase config is present, else the
+   proxy. Both pick the event from FPL's live `current_event`, so neither needs our snapshot to
+   import the squad a manager last fielded. Only useful after a deadline has passed; the manual
+   builder covers pre-season. Needs the function deployed — pending Gemini's backend pass.
 3. **Transfer optimiser** — best legal transfer(s) for the budget, replacing the current
    single-swap suggestion.
 4. **Chip planner** — using the real two-halves chip structure (2× of each, GW1-19 and GW20-38).

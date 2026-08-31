@@ -18,7 +18,7 @@
 
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 
@@ -30,6 +30,10 @@ import {
   transformBootstrap,
 } from './ingest/transform';
 import { latestClosedEvent } from './ingest/importEvent';
+import {
+  fetchPublicSquad,
+  InvalidEntryIdError,
+} from './ingest/publicSquad';
 import { writeFixtures, writePlayers, writeSmallDatasets } from './ingest/store';
 import type { Gameweek, Squad, SquadPick } from '../../shared/types';
 
@@ -166,4 +170,34 @@ export const importSquad = onCall({ region: REGION }, async (request) => {
   await db.collection('squads').doc(request.auth.uid).set(squad);
 
   return { status: 'OK' as const, entryName: entry.name, squad };
+});
+
+/**
+ * Read-only HTTP proxy for a manager's fielded squad, live from FPL.
+ *
+ * GET /fetchSquadPublic?entryId=4698335
+ *
+ * No auth and no Firestore write: it is the public read `importSquad` performs,
+ * exposed over plain HTTP so the squad list pulls before the full backend (and
+ * its config) exists. Event choice comes from the live entry's `current_event`,
+ * not our ingested datasets. The client prefers `importSquad` once the callable
+ * is deployed and configured; this stays as the documented fallback.
+ */
+export const fetchSquadPublic = onRequest({ region: REGION }, async (req, res) => {
+  // CORS so the static site (any origin: hosting URL, preview channel, localhost)
+  // can call it. It reads no cookies and returns no per-user secret, so a wildcard
+  // origin is safe here; the squad it returns is FPL-public once the deadline passes.
+  res.set('Access-Control-Allow-Origin', '*');
+
+  try {
+    const result = await fetchPublicSquad(req.query.entryId);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error instanceof InvalidEntryIdError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    logger.error('fetchSquadPublic failed', error);
+    res.status(502).json({ error: 'Upstream FPL request failed.' });
+  }
 });
