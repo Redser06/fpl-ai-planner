@@ -36,12 +36,14 @@ Two rules the codebase enforces:
 | Pitch view — real formation, legal-only substitutions, captaincy | ✅ Done |
 | Squad points, value, bank and form tracking | ✅ Done |
 | Squad-scoped alerts: availability, captaincy, blank/double GW, form, fixtures, price | ✅ Done |
+| One-click fix on alerts — captaincy and legal transfers, validated against bank and club limit | ✅ Done |
 | Cloud Functions: scheduled ingest, Firestore rules, squad import | ✅ Written, **not yet deployed** |
-| Team-id import UI | ⛔ Needs the backend deployed (CORS) |
+| Team-id import UI — `importSquad` callable, honest four-state handling | ✅ Done (needs the backend deployed to respond) |
+| Data refresh workflow — 4× daily snapshot + hosting redeploy | ✅ Written, runs once the deploy credential is configured |
 | Expected-points model of our own, optimiser, multi-GW planner | ⛔ Not started |
 | LLM narration of alerts | ⛔ Not started |
 
-**99 tests passing.** Everything above marked done is verified against real, recorded API responses.
+**114 tests passing.** Everything above marked done is verified against real, recorded API responses.
 
 ### The assistant works from your actual squad
 

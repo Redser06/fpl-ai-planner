@@ -21,9 +21,6 @@ export const endpoints = {
   fixtures: (event?: number) =>
     event === undefined ? `${FPL_BASE}/fixtures/` : `${FPL_BASE}/fixtures/?event=${event}`,
 
-  /** Per-player detail: upcoming fixtures, this season's history, and past seasons. */
-  elementSummary: (playerId: number) => `${FPL_BASE}/element-summary/${playerId}/`,
-
   /** A manager's entry (team) metadata. Public. */
   entry: (entryId: number) => `${FPL_BASE}/entry/${entryId}/`,
 
@@ -39,7 +36,4 @@ export const endpoints = {
    */
   entryPicks: (entryId: number, event: number) =>
     `${FPL_BASE}/entry/${entryId}/event/${event}/picks/`,
-
-  /** Live per-player scores for a gameweek. Empty until the gameweek starts. */
-  eventLive: (event: number) => `${FPL_BASE}/event/${event}/live/`,
 } as const;

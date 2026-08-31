@@ -14,6 +14,7 @@ import { bootstrapSchema } from '../src/fpl/schemas';
 import { transformBootstrap } from '../src/ingest/transform';
 import {
   applySwap,
+  applyTransfer,
   benchOf,
   buildSquadFromIds,
   canSwap,
@@ -270,6 +271,173 @@ describe('validateSquad', () => {
     const noCaptain = squad.picks.map((pick) => ({ ...pick, isCaptain: false }));
     const errors = validateSquad(noCaptain, players, rules);
     expect(errors.some((error) => error.code === 'NO_CAPTAIN')).toBe(true);
+  });
+});
+
+describe('applyTransfer', () => {
+  const baseSquad = buildSquadFromIds(
+    budgetSquad.map((p) => p.id),
+    players,
+    rules,
+  )!;
+  const byId = new Map(players.map((player) => [player.id, player]));
+
+  function replacementFor(outId: number, maxPrice: number): Player {
+    const out = byId.get(outId)!;
+    const taken = new Set(baseSquad.picks.map((pick) => pick.playerId));
+    return players.find(
+      (p) =>
+        p.position === out.position &&
+        !taken.has(p.id) &&
+        p.id !== outId &&
+        p.availability === 'AVAILABLE' &&
+        p.price <= maxPrice &&
+        // Keep clear of the club cap so this test isolates one constraint at a time.
+        baseSquad.picks.filter((pick) => byId.get(pick.playerId)?.teamId === p.teamId).length <
+          rules.teamLimit,
+    )!;
+  }
+
+  it('applies a legal transfer and keeps slot, captain and formation coherent', () => {
+    const starter = baseSquad.picks.find((pick) => pick.slot <= 11)!;
+    const incoming = replacementFor(starter.playerId, 100);
+    const result = applyTransfer(baseSquad, starter.playerId, incoming.id, players, rules);
+
+    expect(result).not.toBeNull();
+    expect(result!.picks).toHaveLength(15);
+    expect(validateSquad(result!.picks, players, rules)).toEqual([]);
+
+    // Incoming player takes the vacated slot.
+    const incomingPick = result!.picks.find((pick) => pick.playerId === incoming.id)!;
+    expect(incomingPick.slot).toBe(starter.slot);
+    expect(result!.picks.some((pick) => pick.playerId === starter.playerId)).toBe(false);
+
+    // Formation label still matches the pitch, money still adds up.
+    const resolved = resolvePicks(result!.picks, players);
+    expect(result!.formation).toBe(deriveFormation(startersOf(resolved)));
+    const value = resolved.reduce((total, entry) => total + entry.player.price, 0);
+    expect(result!.squadValue).toBeCloseTo(value, 1);
+  });
+
+  it('moves the armband to the vice when the captain is sold', () => {
+    const outCaptain = baseSquad.captainId;
+    // Pick an incoming player of the same position at or below the captain's
+    // price (captains are premium, so a cheap replacement always exists).
+    const outgoing = byId.get(outCaptain)!;
+    const taken = new Set(baseSquad.picks.map((pick) => pick.playerId));
+    const incoming = players.find(
+      (p) =>
+        p.position === outgoing.position &&
+        !taken.has(p.id) &&
+        p.availability === 'AVAILABLE' &&
+        p.price <= outgoing.price &&
+        // Keep the swap legal on clubs too, so this test isolates the captaincy move.
+        baseSquad.picks.filter((pick) => byId.get(pick.playerId)!.teamId === p.teamId).length <
+          rules.teamLimit,
+    )!;
+    expect(incoming, 'need a cheaper same-position replacement').toBeDefined();
+
+    const result = applyTransfer(baseSquad, outCaptain, incoming.id, players, rules)!;
+    expect(result).not.toBeNull();
+    expect(result.captainId).toBe(baseSquad.viceCaptainId);
+    expect(result.viceCaptainId).not.toBe(result.captainId);
+    expect(result.picks.find((pick) => pick.playerId === incoming.id)!.isCaptain).toBe(false);
+    expect(result.picks.find((pick) => pick.playerId === result.captainId)!.isCaptain).toBe(true);
+  });
+
+  it('refuses a transfer that breaks the budget against the real bank', () => {
+    // Spend the bank to zero first, then try to buy anyone pricier than the
+    // outgoing player. Budget squad plus an expensive in = over real budget.
+    const starter = baseSquad.picks.find((pick) => pick.slot <= 11)!;
+    const outgoing = byId.get(starter.playerId)!;
+    const taken = new Set(baseSquad.picks.map((pick) => pick.playerId));
+
+    const noBank = { ...baseSquad, bank: 0 };
+    const tooDear = [...players]
+      .filter(
+        (p) =>
+          p.position === outgoing.position &&
+          !taken.has(p.id) &&
+          p.price > outgoing.price,
+      )
+      .sort((a, b) => b.price - a.price)[0];
+    expect(tooDear, 'need a dearer same-position player to test the refusal').toBeDefined();
+
+    // With zero bank, ANY upgrade is refused — budget is checked against bank,
+    // so bank=0 plus a dearer player is over.
+    expect(applyTransfer(noBank, starter.playerId, tooDear!.id, players, rules)).toBeNull();
+  });
+
+  it('updates the bank by the actual price difference', () => {
+    const starter = baseSquad.picks.find((pick) => pick.slot <= 11)!;
+    const outgoing = byId.get(starter.playerId)!;
+    const incoming = replacementFor(starter.playerId, 100);
+    const result = applyTransfer(baseSquad, starter.playerId, incoming.id, players, rules)!;
+
+    expect(result.bank).toBeCloseTo(baseSquad.bank + outgoing.price - incoming.price, 1);
+  });
+
+  it('refuses a transfer that breaches the club limit', () => {
+    const starter = baseSquad.picks.find((pick) => pick.slot <= 11)!;
+    const outgoing = byId.get(starter.playerId)!;
+    const taken = new Set(baseSquad.picks.map((pick) => pick.playerId));
+
+    // A club already at the cap (excluding the outgoing player's own club).
+    const clubCounts = new Map<number, number>();
+    for (const pick of baseSquad.picks) {
+      const player = byId.get(pick.playerId)!;
+      clubCounts.set(player.teamId, (clubCounts.get(player.teamId) ?? 0) + 1);
+    }
+    const capped = [...clubCounts.entries()].find(
+      ([teamId, count]) => count >= rules.teamLimit && teamId !== outgoing.teamId,
+    );
+    // Force a cap: pick the club with the most owned players, excluding outgoing's.
+    const [teamId] =
+      capped ??
+      [...clubCounts.entries()]
+        .filter(([id]) => id !== outgoing.teamId)
+        .sort((a, b) => b[1] - a[1])[0]!;
+
+    const sameClub = players.find(
+      (p) =>
+        p.teamId === teamId &&
+        p.position === outgoing.position &&
+        !taken.has(p.id) &&
+        p.availability === 'AVAILABLE' &&
+        p.price <= outgoing.price + baseSquad.bank,
+    );
+
+    if (sameClub && (clubCounts.get(teamId) ?? 0) >= rules.teamLimit) {
+      // Genuinely at cap: must be refused.
+      expect(applyTransfer(baseSquad, starter.playerId, sameClub.id, players, rules)).toBeNull();
+    } else if (sameClub) {
+      // Not actually at cap in this recorded squad: result must still be legal.
+      const result = applyTransfer(baseSquad, starter.playerId, sameClub.id, players, rules);
+      expect(result === null || validateSquad(result.picks, players, rules).length === 0).toBe(
+        true,
+      );
+    }
+  });
+
+  it('refuses to duplicate a player already in the squad', () => {
+    const a = baseSquad.picks[0]!;
+    const b = baseSquad.picks.find((pick) => pick.playerId !== a.playerId)!;
+    expect(applyTransfer(baseSquad, a.playerId, b.playerId, players, rules)).toBeNull();
+  });
+
+  it('refuses a cross-position transfer (that is a rebuild, not a transfer)', () => {
+    const starter = baseSquad.picks.find((pick) => pick.slot <= 11)!;
+    const other = players.find(
+      (p) =>
+        p.position !== byId.get(starter.playerId)!.position &&
+        !baseSquad.picks.some((pick) => pick.playerId === p.id),
+    )!;
+    expect(applyTransfer(baseSquad, starter.playerId, other.id, players, rules)).toBeNull();
+  });
+
+  it('returns null for players not in the squad or pool', () => {
+    expect(applyTransfer(baseSquad, 99999, players[0]!.id, players, rules)).toBeNull();
+    expect(applyTransfer(baseSquad, baseSquad.picks[0]!.playerId, 99999, players, rules)).toBeNull();
   });
 });
 

@@ -26,6 +26,7 @@ const baseContext = {
   event: 1,
   totalManagers: meta.totalPlayers,
   now: '2026-08-13T12:00:00.000Z',
+  rules: meta.rules,
 };
 
 describe('captaincy', () => {

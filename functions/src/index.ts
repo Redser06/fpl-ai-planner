@@ -23,10 +23,15 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 
 import { fetchBootstrap, fetchEntry, fetchEntryPicks, fetchFixtures } from './fpl/client';
-import { buildFdrMatrix, toFixture, transformBootstrap } from './ingest/transform';
+import {
+  buildFdrMatrix,
+  toFixture,
+  toMillions,
+  transformBootstrap,
+} from './ingest/transform';
+import { latestClosedEvent } from './ingest/importEvent';
 import { writeFixtures, writePlayers, writeSmallDatasets } from './ingest/store';
-import { toMillions } from './ingest/transform';
-import type { Squad, SquadPick } from '../../shared/types';
+import type { Gameweek, Squad, SquadPick } from '../../shared/types';
 
 initializeApp();
 const db = getFirestore();
@@ -35,6 +40,18 @@ const db = getFirestore();
 const FDR_HORIZON = 8;
 
 const REGION = 'europe-west2';
+
+/**
+ * Uids allowed to call privileged functions (manual ingest and anything else
+ * that costs money). Set via the ADMIN_UIDS env var, comma-separated.
+ *
+ * Authentication is not authorisation: being signed in proves who you are,
+ * it says nothing about what you may trigger.
+ */
+const ADMIN_UIDS = (process.env.ADMIN_UIDS ?? '')
+  .split(',')
+  .map((uid) => uid.trim())
+  .filter(Boolean);
 
 /**
  * Full ingest: bootstrap + fixtures + derived FDR matrix.
@@ -78,9 +95,15 @@ export const ingestHourly = onSchedule(
 /**
  * Manual ingest trigger, so you can populate Firestore immediately after
  * deploying rather than waiting for the first scheduled run.
+ *
+ * Allowlisted: this writes the entire reference dataset and costs money, so it
+ * is restricted to ADMIN_UIDS. Being signed in is not enough.
  */
 export const ingestNow = onCall({ region: REGION, timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to trigger an ingest.');
+  if (!ADMIN_UIDS.includes(request.auth.uid)) {
+    throw new HttpsError('permission-denied', 'This account may not trigger an ingest.');
+  }
   const result = await runIngest();
   logger.info('Manual ingest complete', result);
   return result;
@@ -89,10 +112,14 @@ export const ingestNow = onCall({ region: REGION, timeoutSeconds: 300 }, async (
 /**
  * Imports a squad from a public FPL entry id.
  *
- * Returns `{ status: 'PICKS_NOT_PUBLIC' }` rather than throwing when the
- * gameweek deadline has not passed: FPL keeps picks private until then, so this
- * is a normal pre-deadline state, not an error. The client falls back to the
- * manual squad builder.
+ * Imports the latest gameweek whose deadline has passed (see importEvent.ts)
+ * rather than the current one, so the flow works midweek and not just in the
+ * few hours between a deadline and the next gameweek opening.
+ *
+ * Returns `{ status: 'PICKS_NOT_PUBLIC' }` rather than throwing when even the
+ * previous event has no public picks (e.g. an entry created after it) — that
+ * is a normal state, not an error, and the client falls back to the manual
+ * squad builder.
  */
 export const importSquad = onCall({ region: REGION }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to import a squad.');
@@ -102,17 +129,15 @@ export const importSquad = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('invalid-argument', 'entryId must be a positive integer.');
   }
 
-  const metaSnap = await db.collection('datasets').doc('meta').get();
-  const currentEvent = metaSnap.data()?.currentEvent as number | null | undefined;
+  const gameweeksSnap = await db.collection('datasets').doc('gameweeks').get();
+  const gameweeks = (gameweeksSnap.data()?.items as Gameweek[] | undefined) ?? [];
+  const event = latestClosedEvent(gameweeks, new Date());
 
-  if (!currentEvent) {
+  if (event === null) {
     return { status: 'SEASON_NOT_STARTED' as const };
   }
 
-  const [entry, picks] = await Promise.all([
-    fetchEntry(entryId),
-    fetchEntryPicks(entryId, currentEvent),
-  ]);
+  const [entry, picks] = await Promise.all([fetchEntry(entryId), fetchEntryPicks(entryId, event)]);
 
   if (!picks) {
     return { status: 'PICKS_NOT_PUBLIC' as const, entryName: entry.name };
@@ -127,7 +152,7 @@ export const importSquad = onCall({ region: REGION }, async (request) => {
 
   const squad: Squad = {
     picks: squadPicks,
-    // Derived from the picks themselves once the client has player positions.
+    // Derived client-side once player positions are known (LAZY 6 fix).
     formation: '',
     captainId: squadPicks.find((pick) => pick.isCaptain)?.playerId ?? 0,
     viceCaptainId: squadPicks.find((pick) => pick.isViceCaptain)?.playerId ?? 0,

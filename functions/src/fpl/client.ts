@@ -12,12 +12,10 @@ import { z } from 'zod';
 import { endpoints } from './endpoints';
 import {
   bootstrapSchema,
-  elementSummarySchema,
   entryPicksSchema,
   entrySchema,
   fixturesSchema,
   type RawBootstrap,
-  type RawElementSummary,
   type RawEntry,
   type RawEntryPicks,
   type RawFixture,
@@ -133,10 +131,6 @@ export async function fetchFixtures(event?: number): Promise<RawFixture[]> {
   return fetchParsed(endpoints.fixtures(event), fixturesSchema);
 }
 
-export async function fetchElementSummary(playerId: number): Promise<RawElementSummary> {
-  return fetchParsed(endpoints.elementSummary(playerId), elementSummarySchema);
-}
-
 export async function fetchEntry(entryId: number): Promise<RawEntry> {
   return fetchParsed(endpoints.entry(entryId), entrySchema);
 }
@@ -160,9 +154,9 @@ export async function fetchEntryPicks(
 /**
  * Map over items with bounded concurrency.
  *
- * The nightly history ingest makes 584 element-summary calls; firing those in
- * parallel would be abusive and would get us rate-limited. Firing them
- * sequentially takes ~10 minutes. This keeps a small number in flight.
+ * Keeps a small number of calls in flight against the free public API: full
+ * parallelism would be abusive and get us rate-limited, while a sequential
+ * loop makes bulk fetches (hundreds of elements) take minutes.
  */
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],

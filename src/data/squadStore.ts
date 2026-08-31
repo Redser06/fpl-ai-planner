@@ -55,6 +55,28 @@ export function clearSquad(): void {
   }
 }
 
+const ENTRY_ID_KEY = 'fpl-assistant:entryId:v1';
+
+/** The FPL entry id used for squad import, so a re-import is one click. */
+export function loadEntryId(): number | null {
+  try {
+    const raw = localStorage.getItem(ENTRY_ID_KEY);
+    if (!raw) return null;
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveEntryId(entryId: number): void {
+  try {
+    localStorage.setItem(ENTRY_ID_KEY, String(entryId));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function loadHistory(): GameweekResult[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
