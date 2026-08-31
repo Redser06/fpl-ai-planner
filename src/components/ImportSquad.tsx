@@ -16,7 +16,7 @@ import { CloudDownload, Loader2 } from 'lucide-react';
 
 import type { Player, Squad } from '../../shared/types';
 import { deriveFormation, resolvePicks, startersOf } from '../../shared/model/squad';
-import { callImportSquad, getFirebase } from '../data/firebase';
+import { canImportSquad, importSquadFetch } from '../data/firebase';
 import { loadEntryId, saveEntryId } from '../data/squadStore';
 
 const ENTRY_ID_PATTERN = /^\d+$/;
@@ -36,7 +36,7 @@ export function ImportSquad({
   const [entryId, setEntryId] = useState(remembered ? String(remembered) : '');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ heading: string; body: string } | null>(null);
-  const configured = getFirebase() !== null;
+  const configured = canImportSquad();
 
   async function submit() {
     const trimmed = entryId.trim();
@@ -52,7 +52,7 @@ export function ImportSquad({
     setFailure(null);
 
     try {
-      const result = await callImportSquad(Number(trimmed));
+      const result = await importSquadFetch(Number(trimmed));
 
       switch (result.status) {
         case 'OK': {
@@ -113,8 +113,8 @@ export function ImportSquad({
 
       {!configured && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-950/40 p-3 text-xs leading-relaxed text-amber-200">
-          This build has no Firebase backend configured, so import cannot talk to the server. You
-          can still build your squad manually.
+          This build cannot reach an import service (no backend and no proxy URL). You can still
+          build your squad manually.
         </div>
       )}
 

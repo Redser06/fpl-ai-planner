@@ -65,6 +65,59 @@ export type ImportSquadResult =
   | { status: 'SEASON_NOT_STARTED' };
 
 /**
+ * URL of the read-only fetchSquadPublic proxy (same region). Set at build time
+ * via VITE_SQUAD_PROXY_URL; when unset it is derived from the hosting origin so
+ * a firebase.json rewrite to /api/squad picks it up, else it stays unset and
+ * the callable is the only path.
+ */
+function proxyUrl(): string | null {
+  const explicit = import.meta.env.VITE_SQUAD_PROXY_URL as string | undefined;
+  if (explicit) return explicit;
+  // Hosted build: relative URL hits the firebase.json rewrite. Dev server has
+  // no rewrite, so there is no proxy URL to derive — return null there.
+  if (typeof window !== 'undefined' && !import.meta.env.DEV) return '/api/squad';
+  return null;
+}
+
+/**
+ * Read-only live import via the HTTP proxy. Used when there is no Firebase
+ * config in this build. Throws honestly when no proxy URL is available.
+ */
+export async function callFetchSquadPublic(entryId: number): Promise<ImportSquadResult> {
+  const base = proxyUrl();
+  if (!base) {
+    throw new Error(
+      'No squad proxy URL in this build — set VITE_SQUAD_PROXY_URL or deploy the backend.',
+    );
+  }
+  const response = await fetch(`${base}?entryId=${entryId}`, { headers: { accept: 'application/json' } });
+  if (!response.ok) {
+    throw new Error(`Squad import failed (HTTP ${response.status}).`);
+  }
+  return (await response.json()) as ImportSquadResult;
+}
+
+/**
+ * True when THIS build can serve a live import — either the callable (Firebase
+ * configured) or the read-only HTTP proxy (proxy URL derivable). Drives the
+ * ImportSquad panel's availability: unconfigured static builds are the only
+ * ones that genuinely cannot import.
+ */
+export function canImportSquad(): boolean {
+  return getFirebase() !== null || proxyUrl() !== null;
+}
+
+/**
+ * Imports a manager's squad, preferring the callable when this build has a
+ * Firebase config (it also persists the squad), else the read-only HTTP proxy.
+ * Both return the same ImportSquadResult, so the caller needs no per-path fork.
+ */
+export async function importSquadFetch(entryId: number): Promise<ImportSquadResult> {
+  if (getFirebase()) return callImportSquad(entryId);
+  return callFetchSquadPublic(entryId);
+}
+
+/**
  * Calls the importSquad Cloud Function. Throws when the backend has not been
  * configured or the call fails — the caller renders that honestly.
  */

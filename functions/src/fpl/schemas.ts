@@ -168,6 +168,15 @@ export const entrySchema = z.object({
   summary_overall_rank: z.number().nullable(),
   last_deadline_bank: z.number().nullable(),
   last_deadline_value: z.number().nullable(),
+  /**
+   * The event FPL currently considers live for this entry. Null pre-season
+   * (verified in the recorded fixture), a positive int once the season is
+   * running (verified live, e.g. `2` after GW2). Basis for the read-only
+   * proxy's event choice, so a squad can be fetched without consulting our
+   * ingested gameweeks. `started_event` is the entry's first active event.
+   */
+  current_event: z.number().nullable(),
+  started_event: z.number(),
 });
 
 export const entryPickSchema = z.object({

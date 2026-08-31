@@ -54,6 +54,13 @@ jobs:
 
       - name: Build the production app
         run: npm run build
+        env:
+          # The read-only squad proxy's URL, baked into the bundle. Defaults to
+          # the same-origin firebase.json rewrite (/api/squad → fetchSquadPublic);
+          # override with the VITE_SQUAD_PROXY_URL secret to point at the raw
+          # cloudfunctions.net URL instead. Either way the client routes import
+          # to the proxy when no Firebase client config is present.
+          VITE_SQUAD_PROXY_URL: ${{ secrets.VITE_SQUAD_PROXY_URL || '/api/squad' }}
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -62,5 +69,3 @@ jobs:
 
       - name: Deploy hosting with the fresh data
         run: npx firebase-tools deploy --only hosting --non-interactive
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
