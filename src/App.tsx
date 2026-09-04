@@ -366,6 +366,8 @@ export default function App() {
             <div className="py-10">
               <ImportSquad
                 players={snapshot.players}
+                teams={snapshot.teams}
+                rules={meta.rules}
                 onImported={handleImported}
                 onManual={openManualBuilder}
               />
@@ -376,6 +378,7 @@ export default function App() {
               rules={meta.rules}
               onComplete={handleBuilt}
               onCancel={squad ? () => setBuilding(false) : null}
+              onSwitchToImport={openImport}
             />
           ) : (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
