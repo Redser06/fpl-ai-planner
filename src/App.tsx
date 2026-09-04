@@ -15,8 +15,10 @@ import { CalendarDays, CloudDownload, Inbox, Loader2, PenSquare, ServerCrash, Sh
 import { loadSnapshot, type Snapshot } from './data/snapshot';
 import {
   clearSquad,
+  loadActiveTab,
   loadHistory,
   loadSquad,
+  saveActiveTab,
   saveSquad,
 } from './data/squadStore';
 import { generateAlerts } from '../shared/model/alerts';
@@ -70,11 +72,22 @@ const WATCHLIST_SIZE = 200;
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('inbox');
-  const [squad, setSquad] = useState<Squad | null>(null);
+  const [squad, setSquad] = useState<Squad | null>(() => loadSquad());
+  const [tab, setTabState] = useState<Tab>(() => {
+    const saved = loadActiveTab();
+    if (saved && (saved === 'inbox' || saved === 'squad' || saved === 'players' || saved === 'fixtures')) {
+      return saved;
+    }
+    return loadSquad() ? 'squad' : 'inbox';
+  });
   const [building, setBuilding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [history] = useState(() => loadHistory());
+
+  const setTab = useCallback((next: Tab) => {
+    setTabState(next);
+    saveActiveTab(next);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

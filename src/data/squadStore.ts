@@ -101,3 +101,21 @@ export function recordGameweek(result: GameweekResult): GameweekResult[] {
 
   return updated;
 }
+
+const TAB_KEY = 'fpl-assistant:tab:v1';
+
+export function loadActiveTab(): string | null {
+  try {
+    return localStorage.getItem(TAB_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveTab(tab: string): void {
+  try {
+    localStorage.setItem(TAB_KEY, tab);
+  } catch {
+    /* ignore */
+  }
+}

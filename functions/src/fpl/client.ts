@@ -22,7 +22,7 @@ import {
 } from './schemas';
 
 const USER_AGENT =
-  'fpl-ai-planner/2.0 (personal FPL assistant; +https://github.com/Redser06/fpl-ai-planner)';
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_RETRIES = 3;
@@ -85,7 +85,18 @@ async function fetchJson(url: string, retries = DEFAULT_RETRIES): Promise<unknow
 
     try {
       const response = await fetch(url, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'en-GB,en;q=0.9',
+          'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"macOS"',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin',
+          Referer: 'https://fantasy.premierleague.com/',
+        },
         signal: controller.signal,
       });
 
