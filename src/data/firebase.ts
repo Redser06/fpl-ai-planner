@@ -92,6 +92,11 @@ export async function callFetchSquadPublic(entryId: number): Promise<ImportSquad
   }
   const response = await fetch(`${base}?entryId=${entryId}`, { headers: { accept: 'application/json' } });
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(
+        'Live Entry ID import is unavailable because Cloud Functions are not deployed on this Firebase project (requires Blaze plan). Please use the "Paste from FPL (Instant)" tab to import your current squad with zero backend required!',
+      );
+    }
     throw new Error(`Squad import failed (HTTP ${response.status}).`);
   }
   return (await response.json()) as ImportSquadResult;

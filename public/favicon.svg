@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <!-- Background: signature Premier League Deep Purple -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#46004c" />
+      <stop offset="100%" stop-color="#230027" />
+    </linearGradient>
+
+    <!-- Ball sphere gradient with natural overhead lighting -->
+    <radialGradient id="ballShading" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="65%" stop-color="#f1f5f9" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </radialGradient>
+
+    <!-- Subtle drop shadow under ball -->
+    <radialGradient id="ballShadow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Sparkle glow filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Squircle container with high contrast in dark & light tabs -->
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bgGrad)" stroke="#00ff87" stroke-width="2.5" />
+
+  <!-- Ball shadow on base -->
+  <ellipse cx="32" cy="55" rx="17" ry="4" fill="url(#ballShadow)" />
+
+  <!-- Football base sphere -->
+  <circle cx="32" cy="34" r="19" fill="url(#ballShading)" stroke="#1e0021" stroke-width="0.8" />
+
+  <!-- Outer dark pentagon patches -->
+  <path d="M 32 21.2 L 25.81 16.04 A 19 19 0 0 1 38.19 16.04 Z" fill="#37003c" />
+  <path d="M 44.17 30.04 L 47.17 22.57 A 19 19 0 0 1 51 34.33 Z" fill="#37003c" />
+  <path d="M 39.52 44.36 L 47.56 44.9 A 19 19 0 0 1 37.56 52.17 Z" fill="#37003c" />
+  <path d="M 24.48 44.36 L 26.44 52.17 A 19 19 0 0 1 16.44 44.9 Z" fill="#37003c" />
+  <path d="M 19.83 30.04 L 13 34.33 A 19 19 0 0 1 16.83 22.57 Z" fill="#37003c" />
+
+  <!-- Center dark pentagon -->
+  <polygon points="32,27.5 38.18,31.99 35.82,39.26 28.18,39.26 25.82,31.99" fill="#37003c" />
+
+  <!-- Football panel seams -->
+  <path
+    d="M 32 27.5 L 32 21.2 M 38.18 31.99 L 44.17 30.04 M 35.82 39.26 L 39.52 44.36 M 28.18 39.26 L 24.48 44.36 M 25.82 31.99 L 19.83 30.04 M 32 21.2 L 25.81 16.04 M 32 21.2 L 38.19 16.04 M 44.17 30.04 L 47.17 22.57 M 44.17 30.04 L 51 34.33 M 39.52 44.36 L 47.56 44.9 M 39.52 44.36 L 37.56 52.17 M 24.48 44.36 L 26.44 52.17 M 24.48 44.36 L 16.44 44.9 M 19.83 30.04 L 13 34.33 M 19.83 30.04 L 16.83 22.57 M 38.19 16.04 L 47.17 22.57 M 51 34.33 L 47.56 44.9 M 37.56 52.17 L 26.44 52.17 M 16.44 44.9 L 13 34.33 M 16.83 22.57 L 25.81 16.04"
+    stroke="#250029"
+    stroke-width="1.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+
+  <!-- Specular highlight on ball -->
+  <ellipse cx="27" cy="24" rx="4" ry="2.2" transform="rotate(-30 27 24)" fill="#ffffff" opacity="0.6" />
+
+  <!-- AI / Manager tactical spark in top-right corner -->
+  <g filter="url(#glow)">
+    <path d="M 50 6 Q 50 12 56 12 Q 50 12 50 18 Q 50 12 44 12 Q 50 12 50 6 Z" fill="#00ff87" />
+    <circle cx="50" cy="12" r="1.3" fill="#ffffff" />
+  </g>
+</svg>

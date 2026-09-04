@@ -10,7 +10,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Check, Plus, Search, Trash2, Wand2, X } from 'lucide-react';
+import { Check, ClipboardPaste, Plus, Search, Trash2, Wand2, X } from 'lucide-react';
 
 import type { Player, Position, SquadRules } from '../../shared/types';
 import { autoFillSquad, POSITION_ORDER } from '../../shared/model/squad';
@@ -21,9 +21,16 @@ interface SquadBuilderProps {
   rules: SquadRules;
   onComplete: (playerIds: number[]) => void;
   onCancel: (() => void) | null;
+  onSwitchToImport?: () => void;
 }
 
-export function SquadBuilder({ players, rules, onComplete, onCancel }: SquadBuilderProps) {
+export function SquadBuilder({
+  players,
+  rules,
+  onComplete,
+  onCancel,
+  onSwitchToImport,
+}: SquadBuilderProps) {
   const [selected, setSelected] = useState<number[]>([]);
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState<Position>('GKP');
@@ -101,6 +108,15 @@ export function SquadBuilder({ players, rules, onComplete, onCancel }: SquadBuil
         </div>
 
         <div className="flex items-center gap-3">
+          {onSwitchToImport && (
+            <button
+              type="button"
+              onClick={onSwitchToImport}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-slate-300 transition-colors hover:border-emerald-500/50 hover:text-emerald-300"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" /> Paste from FPL
+            </button>
+          )}
           <button
             type="button"
             onClick={autoFill}
