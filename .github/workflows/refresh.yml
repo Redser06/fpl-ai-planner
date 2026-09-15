@@ -38,11 +38,11 @@ jobs:
       # keeps serving stale data while looking healthy.
       - name: Verify deploy credential is configured
         env:
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY || secrets.FIREBASE_SERVICE_ACCOUNT_FPL_AI_PLANNER }}
         run: |
           if [ -z "$GCP_SERVICE_ACCOUNT_KEY" ]; then
-            echo "::error::The GCP_SERVICE_ACCOUNT_KEY repository secret is not set."
-            echo "::error::Create a service account with the Firebase Hosting Admin role, add its JSON key as the GCP_SERVICE_ACCOUNT_KEY secret, and re-run."
+            echo "::error::Neither GCP_SERVICE_ACCOUNT_KEY nor FIREBASE_SERVICE_ACCOUNT_FPL_AI_PLANNER repository secret is set."
+            echo "::error::Create a service account with the Firebase Hosting Admin role, add its JSON key as a repository secret, and re-run."
             exit 1
           fi
 
@@ -65,7 +65,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY || secrets.FIREBASE_SERVICE_ACCOUNT_FPL_AI_PLANNER }}
 
       - name: Deploy hosting with the fresh data
         run: npx firebase-tools deploy --only hosting --non-interactive
