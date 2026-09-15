@@ -20,6 +20,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false
   },
-  "include": ["src", "shared", "scripts", "functions/src", "functions/test"],
-  "exclude": ["node_modules", "dist", "functions/node_modules", "functions/lib"]
+  "include": ["src", "shared", "scripts"],
+  "exclude": ["node_modules", "dist", "functions"]
 }
