@@ -14,7 +14,7 @@
     ],
     "headers": [
       {
-        "source": "/data/*.json",
+        "source": "/data/**",
         "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }]
       },
       {

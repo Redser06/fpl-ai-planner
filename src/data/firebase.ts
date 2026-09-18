@@ -84,6 +84,21 @@ function proxyUrl(): string | null {
  * config in this build. Throws honestly when no proxy URL is available.
  */
 export async function callFetchSquadPublic(entryId: number): Promise<ImportSquadResult> {
+  // Check for a pre-computed static snapshot first (fast, reliable, immune to Cloudflare blocks)
+  try {
+    const staticRes = await fetch(`/data/squads/${entryId}.json`, {
+      headers: { accept: 'application/json' },
+    });
+    if (staticRes.ok) {
+      const data = await staticRes.json();
+      if (data && typeof data === 'object' && 'status' in data) {
+        return data as ImportSquadResult;
+      }
+    }
+  } catch {
+    // Proceed to live proxy
+  }
+
   const base = proxyUrl();
   if (!base) {
     throw new Error(
@@ -95,6 +110,11 @@ export async function callFetchSquadPublic(entryId: number): Promise<ImportSquad
     if (response.status === 404) {
       throw new Error(
         'Live Entry ID import is unavailable because Cloud Functions are not deployed on this Firebase project (requires Blaze plan). Please use the "Paste from FPL (Instant)" tab to import your current squad with zero backend required!',
+      );
+    }
+    if (response.status === 502) {
+      throw new Error(
+        'The FPL API blocked the server request (Cloudflare datacenter IP block on Google Cloud). Please use the "Paste from FPL (Instant)" tab to import your current squad directly with zero backend required!',
       );
     }
     throw new Error(`Squad import failed (HTTP ${response.status}).`);

@@ -18,6 +18,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { fetchBootstrap, fetchFixtures } from '../functions/src/fpl/client';
+import { fetchPublicSquad } from '../functions/src/ingest/publicSquad';
 import { buildFdrMatrix, toFixture, transformBootstrap } from '../functions/src/ingest/transform';
 
 const OUT_DIR = join(process.cwd(), 'public', 'data');
@@ -52,6 +53,18 @@ async function main(): Promise<void> {
   await write('fixtures.json', fixtures);
   await write('gameweeks.json', gameweeks);
   await write('fdr.json', { fromEvent, eventCount: FDR_HORIZON, rows: fdr });
+
+  const squadsDir = join(OUT_DIR, 'squads');
+  await mkdir(squadsDir, { recursive: true });
+  for (const id of [4698335]) {
+    try {
+      const squadResult = await fetchPublicSquad(id);
+      await writeFile(join(squadsDir, `${id}.json`), JSON.stringify(squadResult, null, 2));
+      console.log(`  squads/${id}.json written (${squadResult.status})`);
+    } catch (e) {
+      console.warn(`  failed to snapshot squad ${id}:`, e);
+    }
+  }
 
   console.log(
     `\nDone. ${players.length} players, ${teams.length} teams, ${fixtures.length} fixtures.`,

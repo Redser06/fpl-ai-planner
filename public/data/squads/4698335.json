@@ -1,0 +1,106 @@
+{
+  "status": "OK",
+  "entryName": "Baby Brother XI 2026",
+  "squad": {
+    "picks": [
+      {
+        "playerId": 529,
+        "slot": 1,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 449,
+        "slot": 2,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 388,
+        "slot": 3,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 4,
+        "slot": 4,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 260,
+        "slot": 5,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 427,
+        "slot": 6,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 426,
+        "slot": 7,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 40,
+        "slot": 8,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 399,
+        "slot": 9,
+        "isCaptain": true,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 464,
+        "slot": 10,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 439,
+        "slot": 11,
+        "isCaptain": false,
+        "isViceCaptain": true
+      },
+      {
+        "playerId": 497,
+        "slot": 12,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 401,
+        "slot": 13,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 88,
+        "slot": 14,
+        "isCaptain": false,
+        "isViceCaptain": false
+      },
+      {
+        "playerId": 112,
+        "slot": 15,
+        "isCaptain": false,
+        "isViceCaptain": false
+      }
+    ],
+    "formation": "",
+    "captainId": 399,
+    "viceCaptainId": 439,
+    "bank": 0.7,
+    "squadValue": 100.2,
+    "entryId": 4698335,
+    "source": "IMPORTED",
+    "updatedAt": "2026-09-18T10:54:45.082Z"
+  }
+}

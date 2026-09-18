@@ -21,8 +21,29 @@ import {
   type RawFixture,
 } from './schemas';
 
-const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const HEADER_PROFILES: Record<string, string>[] = [
+  // Profile 1: Official Mobile App (FPL iOS app - unblocked on Cloudflare)
+  {
+    'User-Agent': 'Premier-League/13.0 (iPhone; iOS 17.5.1; Scale/3.00)',
+    Accept: 'application/json',
+  },
+  // Profile 2: Clean browser without spoofed Sec headers
+  {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'en-GB,en;q=0.9',
+  },
+  // Profile 3: Standard curl / python
+  {
+    'User-Agent': 'curl/8.7.1',
+    Accept: '*/*',
+  },
+  // Profile 4: Explicit client tool
+  {
+    'User-Agent': 'fpl-ai-planner/2.0 (personal FPL assistant; +https://github.com/Redser06/fpl-ai-planner)',
+    Accept: 'application/json',
+  },
+];
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_RETRIES = 3;
@@ -62,58 +83,59 @@ export class FplSchemaError extends Error {
   }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** 5xx and 429 are worth retrying; 4xx (bar 429) will not change on a retry. */
 function isRetryableStatus(status: number): boolean {
-  return status === 429 || status >= 500;
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchJson(url: string, retries = DEFAULT_RETRIES): Promise<unknown> {
   let lastError: unknown;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    if (attempt > 0) {
-      // Exponential backoff with jitter, so parallel ingest workers don't
-      // synchronise their retries into a thundering herd.
-      const backoff = 2 ** attempt * 250 + Math.random() * 250;
-      await sleep(backoff);
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': USER_AGENT,
-          Accept: 'application/json, text/plain, */*',
-          'Accept-Language': 'en-GB,en;q=0.9',
-          'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"macOS"',
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'same-origin',
-          Referer: 'https://fantasy.premierleague.com/',
-        },
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const error = new FplHttpError(response.status, url);
-        if (!isRetryableStatus(response.status)) throw error;
-        lastError = error;
-        continue;
+  for (let profileIdx = 0; profileIdx < HEADER_PROFILES.length; profileIdx++) {
+    const headers = HEADER_PROFILES[profileIdx]!;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0) {
+        const backoff = 2 ** attempt * 250 + Math.random() * 250;
+        await sleep(backoff);
       }
 
-      return await response.json();
-    } catch (error) {
-      // A non-retryable HTTP error should propagate immediately.
-      if (error instanceof FplHttpError && !isRetryableStatus(error.status)) throw error;
-      lastError = error;
-    } finally {
-      clearTimeout(timeout);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(url, {
+          headers,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const bodyText = await response.text().catch(() => '');
+          console.warn(`FPL API returned status ${response.status} with profile ${profileIdx} for ${url}. Response body: ${bodyText.slice(0, 500)}`);
+          const error = new FplHttpError(response.status, url);
+          if (response.status === 403) {
+            // Break inner retry loop to try next header profile immediately
+            lastError = error;
+            break;
+          }
+          if (!isRetryableStatus(response.status)) throw error;
+          lastError = error;
+          continue;
+        }
+
+        return await response.json();
+      } catch (error) {
+        if (error instanceof FplHttpError && error.status === 403) {
+          lastError = error;
+          break;
+        }
+        if (error instanceof FplHttpError && !isRetryableStatus(error.status)) throw error;
+        lastError = error;
+      } finally {
+        clearTimeout(timeout);
+      }
     }
   }
 
