@@ -34,7 +34,7 @@ Two rules the codebase enforces:
 | Real 20-team fixture difficulty matrix, with blank/double detection | ✅ Done |
 | Manual squad builder — live budget, quotas and club limit | ✅ Done |
 | Pitch view — real formation, legal-only substitutions, captaincy | ✅ Done |
-| Squad points, value, bank and form tracking | ✅ Done |
+| Squad points, value, bank and form tracking — per-GW history recorded in the browser from the deadline-locked XI (no auto-subs) | ✅ Done |
 | Squad-scoped alerts: availability, captaincy, blank/double GW, form, fixtures, price | ✅ Done |
 | One-click fix on alerts — captaincy and legal transfers, validated against bank and club limit | ✅ Done |
 | Cloud Functions: scheduled ingest, Firestore rules, squad import | ✅ Written, **not yet deployed** |
@@ -119,6 +119,8 @@ Both paths run **the same** ingest and transform code, so they cannot drift apar
 | `shared/types.ts` | The contract between backend and SPA. Single source of truth. |
 | `shared/model/alerts.ts` | The alert rules engine. Pure, deterministic, no I/O. |
 | `shared/model/squad.ts` | Squad rules, formation, legal swaps, scoring, auto-fill. |
+| `shared/model/history.ts` | Gameweek history recording and squad form. |
+| `functions/src/http/guard.ts` | Rate limit and cache for the unauthenticated squad proxy. |
 | `functions/src/fpl/endpoints.ts` | Every FPL endpoint we use, documented. |
 | `functions/src/fpl/schemas.ts` | Zod schemas — the trust boundary against API drift. |
 | `functions/src/fpl/client.ts` | Our own API client: retry, backoff, timeout, validation. |
@@ -126,7 +128,7 @@ Both paths run **the same** ingest and transform code, so they cannot drift apar
 | `functions/src/ingest/store.ts` | Chunked Firestore writers (quota-aware). |
 | `functions/src/index.ts` | Scheduled ingest + callable squad import + read-only live squad proxy. |
 | `functions/src/ingest/publicSquad.ts` | Pure core of the live squad proxy (event choice, squad assembly); HTTP shell in index.ts. |
-| `scripts/snapshot.ts` | Static data snapshot for the zero-cost hosting path. |
+| `scripts/snapshot.ts` | Static data snapshot for the zero-cost hosting path; also pre-fetches squads for `SNAPSHOT_ENTRY_IDS` as an import fallback. |
 | `firestore.rules` | All client writes denied; user data scoped to its owner. |
 
 ---

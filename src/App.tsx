@@ -19,9 +19,11 @@ import {
   loadHistory,
   loadSquad,
   saveActiveTab,
+  saveHistory,
   saveSquad,
 } from './data/squadStore';
 import { generateAlerts } from '../shared/model/alerts';
+import { updateHistory } from '../shared/model/history';
 import {
   applySwap,
   applyTransfer,
@@ -82,7 +84,8 @@ export default function App() {
   });
   const [building, setBuilding] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [history] = useState(() => loadHistory());
+  const [history, setHistory] = useState(() => loadHistory());
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   const setTab = useCallback((next: Tab) => {
     setTabState(next);
@@ -114,7 +117,25 @@ export default function App() {
   const persist = useCallback((next: Squad) => {
     setSquad(next);
     saveSquad(next);
+    setApplyError(null);
   }, []);
+
+  // Records the current gameweek against the squad as it stood at the deadline.
+  // Runs on every load, so each refreshed snapshot updates the live total.
+  useEffect(() => {
+    if (!snapshot) return;
+    const updated = updateHistory(history, {
+      squad,
+      players: snapshot.players,
+      gameweeks: snapshot.gameweeks,
+      meta: snapshot.meta,
+      rules: snapshot.meta.rules,
+      now: new Date(),
+    });
+    if (!updated) return;
+    saveHistory(updated);
+    setHistory(updated);
+  }, [snapshot, squad, history]);
 
   const playersById = useMemo(
     () => new Map((snapshot?.players ?? []).map((player) => [player.id, player])),
@@ -162,6 +183,8 @@ export default function App() {
       persist({
         ...squad,
         picks,
+        captainId: picks.find((pick) => pick.isCaptain)?.playerId ?? squad.captainId,
+        viceCaptainId: picks.find((pick) => pick.isViceCaptain)?.playerId ?? squad.viceCaptainId,
         formation: deriveFormation(startersOf(resolvePicks(picks, snapshot.players))),
         updatedAt: new Date().toISOString(),
       });
@@ -215,6 +238,7 @@ export default function App() {
     (alert: Alert) => {
       if (!squad || !snapshot) return;
       if (alert.targetId === null || alert.replacementId === null) return;
+      setApplyError(null);
 
       if (alert.type === 'CAPTAINCY') {
         handleSetCaptain(alert.replacementId);
@@ -229,7 +253,12 @@ export default function App() {
         snapshot.players,
         snapshot.meta.rules,
       );
-      if (!transferred) return;
+      if (!transferred) {
+        setApplyError(
+          `${alert.actionLabel ?? 'That transfer'} is no longer legal for your squad — check your bank, club limits and position quotas.`,
+        );
+        return;
+      }
       persist(transferred);
       setTab('squad');
     },
@@ -371,6 +400,7 @@ export default function App() {
             playersById={playersById}
             watchlistLabel={squad ? 'your squad' : `top ${WATCHLIST_SIZE} owned`}
             onApply={squad ? handleApplyAlert : null}
+            applyError={applyError}
           />
         )}
 

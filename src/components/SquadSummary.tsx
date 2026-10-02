@@ -9,8 +9,8 @@
 import { Coins, TrendingUp, Trophy, Wallet } from 'lucide-react';
 
 import type { Player, SeasonMeta, SquadPick } from '../../shared/types';
+import { squadForm as computeSquadForm, type GameweekResult } from '../../shared/model/history';
 import { scoreSquad } from '../../shared/model/squad';
-import type { GameweekResult } from '../data/squadStore';
 import { formatPrice } from '../lib/format';
 
 interface SquadSummaryProps {
@@ -38,11 +38,8 @@ export function SquadSummary({
 
   // Form over the last five recorded gameweeks — the same window FPL uses
   // conceptually, but at squad level rather than player level.
-  const recent = history.slice(-5);
-  const squadForm =
-    recent.length === 0
-      ? null
-      : recent.reduce((total, entry) => total + entry.points, 0) / recent.length;
+  const squadForm = computeSquadForm(history);
+  const formWindow = Math.min(history.length, 5);
 
   return (
     <div className="flex flex-col gap-3">
@@ -51,19 +48,27 @@ export function SquadSummary({
           icon={Trophy}
           label="Total points"
           value={seasonStarted ? String(totalPoints) : '—'}
-          hint={seasonStarted ? `${history.length} GW recorded` : 'Season not started'}
+          hint={
+            seasonStarted
+              ? `${history.length} GW recorded here · XI + captain, no auto-subs`
+              : 'Season not started'
+          }
         />
         <Metric
           icon={TrendingUp}
-          label="Last gameweek"
+          label={lastGameweek && !lastGameweek.final ? 'This gameweek' : 'Last gameweek'}
           value={lastGameweek ? String(lastGameweek.points) : '—'}
-          hint={lastGameweek ? `GW${lastGameweek.event}` : 'No gameweek played'}
+          hint={
+            lastGameweek
+              ? `GW${lastGameweek.event}${lastGameweek.final ? '' : ' · live'} · ${lastGameweek.benchPoints} on bench`
+              : 'Recorded once a deadline passes'
+          }
         />
         <Metric
           icon={TrendingUp}
           label="Squad form"
           value={squadForm === null ? '—' : squadForm.toFixed(1)}
-          hint={squadForm === null ? 'Needs a played GW' : `Last ${recent.length} GW average`}
+          hint={squadForm === null ? 'Needs a played GW' : `Last ${formWindow} GW average`}
         />
         <Metric
           icon={TrendingUp}

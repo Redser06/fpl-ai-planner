@@ -7,19 +7,10 @@
  * moving to server-side persistence later is a swap of these two functions.
  */
 
+import type { GameweekResult } from '../../shared/model/history';
 import type { Squad } from '../../shared/types';
 
 const STORAGE_KEY = 'fpl-assistant:squad:v1';
-
-/** Per-gameweek record, appended as gameweeks complete. */
-export interface GameweekResult {
-  event: number;
-  points: number;
-  benchPoints: number;
-  /** Squad value at the time, in millions. */
-  squadValue: number;
-  recordedAt: string;
-}
 
 const HISTORY_KEY = 'fpl-assistant:history:v1';
 
@@ -82,24 +73,20 @@ export function loadHistory(): GameweekResult[] {
     const raw = localStorage.getItem(HISTORY_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as GameweekResult[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Entries without locked picks cannot be re-scored, so they are dropped.
+    return parsed.filter((entry) => Array.isArray(entry?.picks) && typeof entry.event === 'number');
   } catch {
     return [];
   }
 }
 
-/** Records a completed gameweek, replacing any existing entry for it. */
-export function recordGameweek(result: GameweekResult): GameweekResult[] {
-  const history = loadHistory().filter((entry) => entry.event !== result.event);
-  const updated = [...history, result].sort((a, b) => a.event - b.event);
-
+export function saveHistory(history: readonly GameweekResult[]): void {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   } catch {
     /* ignore */
   }
-
-  return updated;
 }
 
 const TAB_KEY = 'fpl-assistant:tab:v1';

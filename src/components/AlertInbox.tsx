@@ -118,11 +118,14 @@ export function AlertInbox({
   playersById,
   watchlistLabel,
   onApply,
+  applyError,
 }: {
   alerts: Alert[];
   playersById: Map<number, Player>;
   watchlistLabel: string;
   onApply: ((alert: Alert) => void) | null;
+  /** Why the last one-click fix was refused, if it was. */
+  applyError: string | null;
 }) {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -137,6 +140,15 @@ export function AlertInbox({
           Watching {watchlistLabel}
         </span>
       </div>
+
+      {applyError && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+        >
+          {applyError}
+        </p>
+      )}
 
       {alerts.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/50 py-12 text-center">

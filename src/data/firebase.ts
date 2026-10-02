@@ -79,47 +79,81 @@ function proxyUrl(): string | null {
   return null;
 }
 
+/** Parses a JSON body, or null when the response is not JSON (e.g. the SPA fallback page). */
+async function jsonOrNull(response: Response): Promise<Record<string, unknown> | null> {
+  if (!response.headers.get('content-type')?.includes('application/json')) return null;
+  try {
+    const body: unknown = await response.json();
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The squad snapshot written by `npm run snapshot` for the entry ids it was
+ * configured with. Refreshed with the data snapshot, so it can be hours old.
+ */
+async function loadStaticSquad(entryId: number): Promise<ImportSquadResult | null> {
+  try {
+    const response = await fetch(`${import.meta.env.BASE_URL}data/squads/${entryId}.json`);
+    if (!response.ok) return null;
+    const body = await jsonOrNull(response);
+    return body && 'status' in body ? (body as unknown as ImportSquadResult) : null;
+  } catch {
+    return null;
+  }
+}
+
+const PASTE_HINT = 'Use the "Paste from FPL" tab to import your squad without a backend.';
+
 /**
  * Read-only live import via the HTTP proxy. Used when there is no Firebase
- * config in this build. Throws honestly when no proxy URL is available.
+ * config in this build. Falls back to the static squad snapshot only when the
+ * live path cannot answer, so a snapshot never shadows fresher live data.
  */
 export async function callFetchSquadPublic(entryId: number): Promise<ImportSquadResult> {
-  // Check for a pre-computed static snapshot first (fast, reliable, immune to Cloudflare blocks)
-  try {
-    const staticRes = await fetch(`/data/squads/${entryId}.json`, {
-      headers: { accept: 'application/json' },
-    });
-    if (staticRes.ok) {
-      const data = await staticRes.json();
-      if (data && typeof data === 'object' && 'status' in data) {
-        return data as ImportSquadResult;
-      }
-    }
-  } catch {
-    // Proceed to live proxy
-  }
-
   const base = proxyUrl();
   if (!base) {
+    const snapshot = await loadStaticSquad(entryId);
+    if (snapshot) return snapshot;
     throw new Error(
       'No squad proxy URL in this build — set VITE_SQUAD_PROXY_URL or deploy the backend.',
     );
   }
-  const response = await fetch(`${base}?entryId=${entryId}`, { headers: { accept: 'application/json' } });
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(
-        'Live Entry ID import is unavailable because Cloud Functions are not deployed on this Firebase project (requires Blaze plan). Please use the "Paste from FPL (Instant)" tab to import your current squad with zero backend required!',
-      );
-    }
-    if (response.status === 502) {
-      throw new Error(
-        'The FPL API blocked the server request (Cloudflare datacenter IP block on Google Cloud). Please use the "Paste from FPL (Instant)" tab to import your current squad directly with zero backend required!',
-      );
-    }
-    throw new Error(`Squad import failed (HTTP ${response.status}).`);
+
+  let response: Response;
+  try {
+    response = await fetch(`${base}?entryId=${entryId}`, {
+      headers: { accept: 'application/json' },
+    });
+  } catch {
+    const snapshot = await loadStaticSquad(entryId);
+    if (snapshot) return snapshot;
+    throw new Error(`Could not reach the squad import service. ${PASTE_HINT}`);
   }
-  return (await response.json()) as ImportSquadResult;
+
+  const body = await jsonOrNull(response);
+  if (response.ok && body && 'status' in body) return body as unknown as ImportSquadResult;
+
+  if (body?.code === 'ENTRY_NOT_FOUND') {
+    throw new Error(`No FPL team has entry id ${entryId}. Check the number in your team's URL.`);
+  }
+  if (response.status === 400 || response.status === 429) {
+    throw new Error(typeof body?.error === 'string' ? body.error : `Request rejected (HTTP ${response.status}).`);
+  }
+
+  // Live path could not answer: the proxy is not deployed, or FPL refused it.
+  const snapshot = await loadStaticSquad(entryId);
+  if (snapshot) return snapshot;
+
+  if (body?.code === 'UPSTREAM_FAILED') {
+    throw new Error(`The FPL API did not answer the import service's request. ${PASTE_HINT}`);
+  }
+  if (response.status === 404 || !body) {
+    throw new Error(`The squad import service is not deployed for this site. ${PASTE_HINT}`);
+  }
+  throw new Error(`Squad import failed (HTTP ${response.status}).`);
 }
 
 /**

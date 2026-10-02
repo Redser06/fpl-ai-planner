@@ -47,6 +47,12 @@ const HEADER_PROFILES: Record<string, string>[] = [
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_RETRIES = 3;
+/**
+ * Wall-clock ceiling for one logical request across every profile and retry.
+ * The squad proxy makes up to three of these in sequence, so its function
+ * timeout must exceed three budgets.
+ */
+const DEFAULT_BUDGET_MS = 25_000;
 
 /** Thrown when the API returns a non-2xx status. */
 export class FplHttpError extends Error {
@@ -91,19 +97,30 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchJson(url: string, retries = DEFAULT_RETRIES): Promise<unknown> {
+async function fetchJson(
+  url: string,
+  retries = DEFAULT_RETRIES,
+  budgetMs = DEFAULT_BUDGET_MS,
+): Promise<unknown> {
   let lastError: unknown;
+  const deadline = Date.now() + budgetMs;
+  const remaining = (): number => deadline - Date.now();
 
-  for (let profileIdx = 0; profileIdx < HEADER_PROFILES.length; profileIdx++) {
+  outer: for (let profileIdx = 0; profileIdx < HEADER_PROFILES.length; profileIdx++) {
     const headers = HEADER_PROFILES[profileIdx]!;
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt > 0) {
         const backoff = 2 ** attempt * 250 + Math.random() * 250;
+        if (remaining() <= backoff) break outer;
         await sleep(backoff);
       }
+      if (remaining() <= 0) break outer;
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      const timeout = setTimeout(
+        () => controller.abort(),
+        Math.min(DEFAULT_TIMEOUT_MS, remaining()),
+      );
 
       try {
         const response = await fetch(url, {
@@ -141,7 +158,7 @@ async function fetchJson(url: string, retries = DEFAULT_RETRIES): Promise<unknow
 
   throw lastError instanceof Error
     ? lastError
-    : new Error(`FPL API request failed for ${url}: ${String(lastError)}`);
+    : new Error(`FPL API request failed for ${url}: ${lastError === undefined ? `no response within ${budgetMs}ms` : String(lastError)}`);
 }
 
 /**

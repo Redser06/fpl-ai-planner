@@ -72,9 +72,13 @@ const KNOWN_TEAM_ALIASES: Record<string, string> = {
 
 function normalizeTeamName(raw: string): string {
   const cleaned = cleanString(raw);
-  return KNOWN_TEAM_ALIASES[cleaned] ?? cleaned;
+  return cleanString(KNOWN_TEAM_ALIASES[cleaned] ?? cleaned);
 }
 
+/**
+ * Short codes only ever match exactly: as substrings they collide with real
+ * names ("CHE" sits inside "manchester").
+ */
 function teamMatches(playerTeam: Team, query: string): boolean {
   const cQuery = normalizeTeamName(query);
   if (!cQuery) return true;
@@ -82,12 +86,7 @@ function teamMatches(playerTeam: Team, query: string): boolean {
   const tName = normalizeTeamName(playerTeam.name);
   const tShort = cleanString(playerTeam.shortName);
 
-  return (
-    tName.includes(cQuery) ||
-    cQuery.includes(tName) ||
-    tShort === cQuery ||
-    cQuery.includes(tShort)
-  );
+  return tShort === cQuery || tName.includes(cQuery) || cQuery.includes(tName);
 }
 
 /**

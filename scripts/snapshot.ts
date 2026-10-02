@@ -19,12 +19,28 @@ import { join } from 'node:path';
 
 import { fetchBootstrap, fetchFixtures } from '../functions/src/fpl/client';
 import { fetchPublicSquad } from '../functions/src/ingest/publicSquad';
-import { buildFdrMatrix, toFixture, transformBootstrap } from '../functions/src/ingest/transform';
+import {
+  buildFdrMatrix,
+  fdrEventCount,
+  toFixture,
+  transformBootstrap,
+} from '../functions/src/ingest/transform';
 
 const OUT_DIR = join(process.cwd(), 'public', 'data');
 
 /** How many gameweeks of fixture difficulty to precompute. */
 const FDR_HORIZON = 8;
+
+/**
+ * Entry ids whose squads are pre-fetched as an import fallback for when the
+ * live proxy is unavailable. Comma-separated in SNAPSHOT_ENTRY_IDS.
+ */
+function snapshotEntryIds(): number[] {
+  return (process.env.SNAPSHOT_ENTRY_IDS ?? '')
+    .split(',')
+    .map((raw) => Number(raw.trim()))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
 
 async function write(name: string, data: unknown): Promise<void> {
   const json = JSON.stringify(data);
@@ -44,7 +60,8 @@ async function main(): Promise<void> {
 
   // Build the FDR matrix from the next gameweek, falling back to GW1 pre-season.
   const fromEvent = meta.nextEvent ?? meta.currentEvent ?? 1;
-  const fdr = buildFdrMatrix(teams, fixtures, fromEvent, FDR_HORIZON);
+  const eventCount = fdrEventCount(gameweeks, fromEvent, FDR_HORIZON);
+  const fdr = buildFdrMatrix(teams, fixtures, fromEvent, eventCount);
 
   console.log(`Writing snapshot to ${OUT_DIR}`);
   await write('meta.json', meta);
@@ -52,11 +69,11 @@ async function main(): Promise<void> {
   await write('players.json', players);
   await write('fixtures.json', fixtures);
   await write('gameweeks.json', gameweeks);
-  await write('fdr.json', { fromEvent, eventCount: FDR_HORIZON, rows: fdr });
+  await write('fdr.json', { fromEvent, eventCount, rows: fdr });
 
   const squadsDir = join(OUT_DIR, 'squads');
   await mkdir(squadsDir, { recursive: true });
-  for (const id of [4698335]) {
+  for (const id of snapshotEntryIds()) {
     try {
       const squadResult = await fetchPublicSquad(id);
       await writeFile(join(squadsDir, `${id}.json`), JSON.stringify(squadResult, null, 2));

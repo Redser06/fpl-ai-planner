@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>North Harbour Gear · Seller Agent Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">M</div>
+        <div>
+          <div class="brand-name">Meridian Pay</div>
+          <div class="brand-sub">Managed Seller Agents</div>
+        </div>
+      </div>
+      <div class="merchant" title="Merchant account">
+        <div>
+          <b>North Harbour Gear</b>
+          <span>Seller ID A2…R7Q · UK · Live</span>
+        </div>
+        <span class="live-dot"></span>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot">
+        <div class="row"><span class="live-dot" style="background:#2ecc71"></span> Mandate Gate enforcing</div>
+        <div class="row"><span class="live-dot" style="background:#2ecc71"></span> SP-API · MCP connected</div>
+        <div class="row" style="margin-top:6px; gap:6px;">
+          <button data-action="goto" data-view="architecture">Architecture</button>
+          <button data-action="resetDemo" title="Clear local changes and reload seed data">Reset demo</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb" id="crumb"></div>
+        <div class="topbar-actions">
+          <button class="btn" data-action="simulate" title="Have an agent generate a new proposal and run it through the Mandate Gate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+            Simulate agent proposal
+          </button>
+          <button class="btn" data-action="newAgent">+ New agent</button>
+          <button class="btn primary" data-action="toggleCopilot" id="copilotToggle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H8l-4 4V5z"/></svg>
+            Copilot
+          </button>
+        </div>
+      </header>
+      <section class="view" id="view"></section>
+    </main>
+
+    <aside class="copilot" id="copilot">
+      <div class="copilot-head">
+        <div>
+          <h3>Console Copilot</h3>
+          <div class="sub">Manage agents by chat or voice · every action is audited</div>
+        </div>
+        <div class="row">
+          <label class="toggle" title="Read replies aloud"><input type="checkbox" id="ttsToggle" /> Speak</label>
+          <button class="btn ghost sm" data-action="toggleCopilot">✕</button>
+        </div>
+      </div>
+      <div class="copilot-log" id="copilotLog"></div>
+      <div class="copilot-suggest" id="copilotSuggest"></div>
+      <form class="copilot-input" id="copilotForm" autocomplete="off">
+        <button type="button" class="mic" id="micBtn" title="Hold to talk (Web Speech API)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+        <input id="copilotInput" placeholder="e.g. set max cut to 8% · pause pricing agent · what's blocked?" />
+        <button class="btn primary" type="submit">Send</button>
+      </form>
+    </aside>
+  </div>
+
+  <div id="toasts"></div>
+  <div class="modal-backdrop hidden" id="modal"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

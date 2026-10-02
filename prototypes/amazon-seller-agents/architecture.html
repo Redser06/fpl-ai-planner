@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Architecture · Seller Agent Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { background: var(--bg); }
+    .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }
+    @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+    .cols .card-body { font-size: 13px; color: var(--ink-2); }
+    .cols ul { margin: 6px 0 0; padding-left: 18px; }
+    .cols li { margin: 3px 0; }
+    .flow-step { display: grid; grid-template-columns: 32px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-2); }
+    .flow-step:last-child { border-bottom: 0; }
+    .flow-step .n { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 12px; }
+    .flow-step b { display: block; }
+    .flow-step span { color: var(--muted); font-size: 12.5px; }
+    .mermaid svg { max-width: 100%; height: auto; }
+    .fallback { font-family: var(--mono); font-size: 12px; white-space: pre; overflow: auto; color: var(--ink-2); display: none; }
+  </style>
+</head>
+<body>
+  <div class="arch-topbar">
+    <div class="row">
+      <div class="brand-mark">M</div>
+      <div><div style="font-weight:600">Meridian Pay · Managed Seller Agents</div><div class="small muted">North Harbour Gear · Architecture</div></div>
+    </div>
+    <a class="btn" href="index.html">← Back to console</a>
+  </div>
+
+  <div class="arch-wrap">
+    <h1 class="serif">How the Seller Agent Console works</h1>
+    <p>A PSP-hosted control plane that lets a merchant run AI agents against their Amazon seller account without handing them the keys. Agents <em>propose</em>; a policy engine (the Mandate Gate) decides what is even eligible; a human approves; only approved writes reach the Selling Partner API. Shopper-facing agents sell inside Claude, ChatGPT and Gemini under the same mandates, and checkouts clear through the PSP's agentic-payments rails.</p>
+
+    <h2>1 · Seller-side control loop</h2>
+    <p>Pricing, Listing and Restock agents run as custom agents (Quick / Claude / Seller Assistant workflows). Every proposal goes through the Mandate Gate. In-mandate proposals queue in the inbox; out-of-mandate proposals are auto-blocked and only ever appear in the audit log.</p>
+    <pre class="mermaid">
+flowchart TB
+  subgraph Human["Seller (human)"]
+    Owner["Account owner / admin\nNorth Harbour Gear"]
+  end
+
+  subgraph Console["Seller Agent Console\n(Mandate Gate + approval UI)"]
+    Roster["Agent roster\nPricing · Listing · Restock · Ads?"]
+    Mandates["Policy engine / Mandate Gate\nmax cut % · never below cost · stock floor"]
+    Inbox["Proposal inbox\nApprove · Edit · Decline"]
+    Audit["Audit log"]
+  end
+
+  subgraph Agents["Custom Agents\n(Quick / Claude / Seller Assistant workflows)"]
+    Pricing["Pricing Agent"]
+    Listing["Listing Agent"]
+    Restock["Restock Agent"]
+    AdsOpt["Ads Agent\n(optional / separate console)"]
+  end
+
+  subgraph AmazonEdge["Amazon Selling Partner surface"]
+    Plugin["Selling Partner plugin\nMCP: sellingpartner-ai.amazon.com/mcp"]
+    SA["Seller Assistant\n+ Workflows + Memory\nSeller Central"]
+    SPAPI["Selling Partner API\nOAuth · role-scoped tools"]
+  end
+
+  subgraph Domains["Amazon commerce domains"]
+    Catalog["Catalog / Listings"]
+    Inventory["Inventory / FBA inbound"]
+    PricingD["Pricing / Featured Offer"]
+    Orders["Orders / Sales analytics"]
+  end
+
+  Owner -->|"set goals & guardrails"| Roster
+  Owner -->|"review queue"| Inbox
+  Roster --> Pricing & Listing & Restock & AdsOpt
+  Pricing & Listing & Restock -->|"propose change"| Mandates
+  Mandates -->|"in-mandate → queue"| Inbox
+  Mandates -->|"out-of-mandate → auto-block"| Audit
+  Inbox -->|"approved write"| Plugin
+  Inbox -->|"approved write"| SA
+  Plugin --> SPAPI
+  SA --> SPAPI
+  SPAPI --> Catalog & Inventory & PricingD & Orders
+  Catalog & Inventory & PricingD & Orders -->|"signals / notifications"| SA
+  SA -->|"status & outcomes"| Audit
+  Plugin -->|"status & outcomes"| Audit
+  Audit -->|"activity feed"| Owner
+    </pre>
+
+    <h2>2 · Shopper-side: agents as plugins for Claude, ChatGPT and Gemini</h2>
+    <p>The same agent definitions are published as a Claude MCP connector, a ChatGPT app (Apps SDK, with ACP checkout) and a Gemini extension. The Storefront Agent answers shoppers grounded only in listing data, and can only make offers the mandate allows. Payment runs through Meridian Pay's agentic checkout (AP2 mandates / ACP), so the merchant never shares card acceptance with the assistant vendor.</p>
+    <pre class="mermaid">
+flowchart LR
+  subgraph Shoppers["Shoppers"]
+    S1["Shopper in Claude"]
+    S2["Shopper in ChatGPT"]
+    S3["Shopper in Gemini"]
+  end
+
+  subgraph Plugins["Published plugins (one agent definition)"]
+    P1["Claude\nMCP connector"]
+    P2["ChatGPT\nApp · Apps SDK · ACP"]
+    P3["Gemini\nExtension"]
+  end
+
+  subgraph PSP["Meridian Pay · Managed Seller Agents"]
+    SF["Storefront Agent\n(grounded in listing data)"]
+    MG["Mandate Gate\ndiscretionary ≤ 5% · never below cost\nno discounts under stock floor"]
+    CO["Agentic checkout\nAP2 mandates · ACP · tokenised card"]
+    AUD["Audit log + Insights\nconversations · outcomes · what works"]
+    CON["Seller Agent Console\n(buttons/flows · chat · voice)"]
+  end
+
+  subgraph Amazon["Amazon"]
+    SPAPI["Selling Partner API\ncatalog · orders · inventory"]
+  end
+
+  S1 --> P1 --> SF
+  S2 --> P2 --> SF
+  S3 --> P3 --> SF
+  SF -->|"catalog:read · orders:read"| SPAPI
+  SF -->|"wants to make an offer"| MG
+  MG -->|"in mandate"| SF
+  MG -->|"out of mandate → block + log"| AUD
+  SF -->|"checkout:create"| CO
+  CO -->|"authorised · order created"| SPAPI
+  SF -->|"transcript · outcome"| AUD
+  CO -->|"auth · disputes"| AUD
+  AUD --> CON
+  CON -->|"goals · mandates · approvals"| MG
+    </pre>
+
+    <h2>3 · Components</h2>
+    <div class="cols">
+      <div class="card">
+        <div class="card-head"><h3>Console (this prototype)</h3></div>
+        <div class="card-body">
+          <ul>
+            <li><b>Agent roster</b> — status, published surfaces, goal, 7-day metrics; pause / resume / edit; new-agent wizard.</li>
+            <li><b>Mandate Gate</b> — <code>evaluateProposal()</code> runs every rule, returns per-check pass/fail. Changing a mandate re-evaluates every open proposal (blocked ↔ pending).</li>
+            <li><b>Proposal inbox</b> — Approve (dispatches a write, confirms asynchronously), Edit (live gate feedback; cannot save out-of-mandate), Decline (reason captured).</li>
+            <li><b>Conversations</b> — transcripts per surface, outcome, escalation resolution.</li>
+            <li><b>Sales &amp; payments</b> — GMV by surface, Featured Offer status, stock vs floor, PSP auth metrics.</li>
+            <li><b>Insights</b> — what works / what doesn't, each with an action that lands on the relevant proposal or agent.</li>
+            <li><b>Copilot</b> — chat + Web Speech voice; intents call the same functions as the buttons and write to the audit log as the owner.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Agent runtime</h3></div>
+        <div class="card-body">
+          <ul>
+            <li>One agent definition (goal, tools, mandate scope) compiled to three plugin manifests: MCP server (Claude), Apps SDK app with ACP checkout (ChatGPT), Extension (Gemini).</li>
+            <li>Seller-facing agents (Pricing, Listing, Restock, Ads) are reachable by the seller from the same assistants — "ask Pricing Agent in Claude".</li>
+            <li>Shopper-facing agents (Storefront, Support) are reachable by shoppers; they only read catalog/orders and can only offer what the mandate allows.</li>
+            <li>Tools are role-scoped OAuth grants on SP-API; <code>*:write</code> tools are only callable from an approved proposal.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Approval flow</h3></div>
+        <div class="card-body">
+          <div class="flow-step"><div class="n">1</div><div><b>Propose</b><span>Agent emits a typed proposal (price_change · restock · listing_update · discount_offer) with rationale.</span></div></div>
+          <div class="flow-step"><div class="n">2</div><div><b>Gate</b><span>Mandate Gate evaluates. All checks pass → inbox. Any fail → auto-block, audit log, never actionable.</span></div></div>
+          <div class="flow-step"><div class="n">3</div><div><b>Decide</b><span>Owner approves, edits (re-gated live) or declines — in the console or via Copilot chat/voice.</span></div></div>
+          <div class="flow-step"><div class="n">4</div><div><b>Write</b><span>Approved proposal → Selling Partner plugin (MCP) or Seller Assistant workflow → SP-API with role-scoped OAuth.</span></div></div>
+          <div class="flow-step"><div class="n">5</div><div><b>Observe</b><span>SP-API signals and PSP payment events stitch back onto the proposal / conversation in the audit log and feed Insights.</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        fontFamily: 'Inter, sans-serif',
+        primaryColor: '#e2f1ee', primaryBorderColor: '#0c6b63', primaryTextColor: '#15202b',
+        lineColor: '#6f7c89', secondaryColor: '#faf9f6', tertiaryColor: '#f4f3ee',
+        clusterBkg: '#faf9f6', clusterBorder: '#e4e1d8', edgeLabelBackground: '#ffffff',
+      },
+      flowchart: { curve: 'basis', padding: 12 },
+    });
+  </script>
+</body>
+</html>

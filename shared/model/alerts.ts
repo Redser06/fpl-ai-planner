@@ -18,8 +18,8 @@
  * over these objects — it may never produce a number or invent an alert.
  */
 
-import type { Alert, FdrRow, Player, SquadPick, SquadRules } from '../types';
-import { compareForCaptaincy, costSquad, resolvePicks, startersOf } from './squad';
+import type { Alert, FdrRow, Player, Squad, SquadPick, SquadRules } from '../types';
+import { applyTransfer, compareForCaptaincy, costSquad, resolvePicks, startersOf } from './squad';
 
 /**
  * Net transfer momentum (as a fraction of all managers) beyond which a price
@@ -98,20 +98,28 @@ export interface ReplacementContext {
   clubCounts: ReadonlyMap<number, number>;
   /** Max players per club, from the live rules. */
   teamLimit: number;
+  /** Players already in the squad — never suggested as an incoming transfer. */
+  ownedIds?: ReadonlySet<number>;
+  /**
+   * Final legality gate, run on candidates in ranked order. The first one that
+   * passes is returned, so the suggestion is exactly what the apply path accepts.
+   */
+  isLegal?: (candidate: Player) => boolean;
 }
+
+/** Absorbs float noise in tenths-of-a-million arithmetic, never real money. */
+const PRICE_EPSILON = 1e-9;
 
 export function findReplacement(
   player: Player,
   players: readonly Player[],
   context: ReplacementContext,
 ): Player | null {
-  // The +0.3 slack covers a likely price rise between alert and action; an
-  // honestly-unaffordable suggestion is still better than none, so anything
-  // within 0.3 of budget is allowed to surface.
-  const maxPrice = player.price + context.bank + 0.3;
+  const maxPrice = player.price + context.bank + PRICE_EPSILON;
 
   const candidates = players.filter((candidate) => {
     if (candidate.id === player.id) return false;
+    if (context.ownedIds?.has(candidate.id)) return false;
     if (candidate.position !== player.position) return false;
     if (candidate.availability !== 'AVAILABLE') return false;
     if (candidate.price > maxPrice) return false;
@@ -127,23 +135,38 @@ export function findReplacement(
     return candidate.epNext > 0 || candidate.minutes > 0;
   });
 
-  if (candidates.length === 0) return null;
-
-  return candidates.reduce((best, candidate) =>
-    candidate.epNext > best.epNext ? candidate : best,
-  );
+  // Stable sort keeps the pool's order among ties.
+  const ranked = [...candidates].sort((a, b) => b.epNext - a.epNext);
+  return ranked.find((candidate) => context.isLegal?.(candidate) ?? true) ?? null;
 }
 
 /** Builds the replacement context for the squad in play, if we have one. */
-function replacementContext(context: AlertContext): ReplacementContext | null {
+function replacementContext(context: AlertContext, outgoing: Player): ReplacementContext | null {
   if (!context.squad) return null;
 
-  const clubCounts =
-    context.squad.clubCounts ?? clubCountsFromPicks(context.squad.picks, context.players);
-  const bank =
-    context.squad.bank ?? costSquad(context.squad.picks, context.players, context.rules).bank;
+  const { picks, captainId } = context.squad;
+  const clubCounts = context.squad.clubCounts ?? clubCountsFromPicks(picks, context.players);
+  const bank = context.squad.bank ?? costSquad(picks, context.players, context.rules).bank;
 
-  return { bank, clubCounts, teamLimit: context.rules.teamLimit };
+  const squad: Squad = {
+    picks: [...picks],
+    formation: '',
+    captainId,
+    viceCaptainId: picks.find((pick) => pick.isViceCaptain)?.playerId ?? 0,
+    bank,
+    squadValue: 0,
+    source: 'MANUAL',
+    updatedAt: context.now,
+  };
+
+  return {
+    bank,
+    clubCounts,
+    teamLimit: context.rules.teamLimit,
+    ownedIds: new Set(picks.map((pick) => pick.playerId)),
+    isLegal: (candidate) =>
+      applyTransfer(squad, outgoing.id, candidate.id, context.players, context.rules) !== null,
+  };
 }
 
 /** Derives per-club ownership counts when the caller did not supply them. */
@@ -165,9 +188,11 @@ function clubCountsFromPicks(
  * Resolves a legal replacement for a squad player. Without squad context there
  * is no bank or club count to check against, so no replacement is offered —
  * an unsuggestable alert beats a suggestion that would be refused on apply.
+ * With a squad, every candidate is run through `applyTransfer` (the full
+ * rulebook plus the bank), so a suggestion is always one the button can land.
  */
 function replacementFor(player: Player, context: AlertContext): Player | null {
-  const replacementCtx = replacementContext(context);
+  const replacementCtx = replacementContext(context, player);
   if (!replacementCtx) return null;
   return findReplacement(player, context.players, replacementCtx);
 }

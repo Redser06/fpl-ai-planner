@@ -341,6 +341,20 @@ export function buildFdrMatrix(
     .sort((a, b) => a.teamName.localeCompare(b.teamName));
 }
 
+/**
+ * How many gameweeks the FDR matrix can cover from `fromEvent` without running
+ * past the final gameweek — cells beyond it would read as blanks.
+ */
+export function fdrEventCount(
+  gameweeks: readonly Gameweek[],
+  fromEvent: number,
+  horizon: number,
+): number {
+  if (gameweeks.length === 0) return horizon;
+  const lastEvent = Math.max(...gameweeks.map((gameweek) => gameweek.id));
+  return Math.max(0, Math.min(horizon, lastEvent - fromEvent + 1));
+}
+
 /** Convenience: full bootstrap → all our projections in one pass. */
 export function transformBootstrap(bootstrap: RawBootstrap, ingestedAt: string) {
   const teams = bootstrap.teams.map(toTeam);

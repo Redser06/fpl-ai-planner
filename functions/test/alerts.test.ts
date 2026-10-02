@@ -13,6 +13,12 @@ import { describe, expect, it } from 'vitest';
 import { bootstrapSchema } from '../src/fpl/schemas';
 import { transformBootstrap } from '../src/ingest/transform';
 import { findReplacement, generateAlerts } from '../../shared/model/alerts';
+import {
+  applyTransfer,
+  autoFillSquad,
+  buildSquadFromIds,
+  validateSquad,
+} from '../../shared/model/squad';
 import type { Player } from '../../shared/types';
 
 const FIXTURES = join(__dirname, 'fixtures');
@@ -79,37 +85,62 @@ describe('availability alerts on real data', () => {
     expect(alerts[0]!.severity).toBe('CRITICAL');
   });
 
-  it('suggests a replacement that is available, same position and affordable', () => {
-    const watchedIds = flagged.map((player) => player.id);
-    const contextBank = 5;
-    // A pseudo-squad containing the flagged players, with bank to spend —
-    // replacements need squad context to be found at all.
-    const picks = watchedIds.map((id, index) => ({
-      playerId: id,
-      slot: index + 1,
-      isCaptain: index === 0,
-      isViceCaptain: index === 1,
-    }));
+  describe('with a real, legal squad', () => {
+    const ids = autoFillSquad(players, meta.rules)!;
+    const built = buildSquadFromIds(ids, players, meta.rules)!;
+    // Flag every outfield squad member so each one needs a replacement.
+    const flaggedIds = new Set(
+      built.picks
+        .map((pick) => players.find((p) => p.id === pick.playerId)!)
+        .filter((p) => p.position !== 'GKP')
+        .map((p) => p.id),
+    );
+    const doctored = players.map((p) =>
+      flaggedIds.has(p.id) ? { ...p, availability: 'INJURED' as const, chanceOfPlayingNextRound: 0 } : p,
+    );
+    const squad = { ...built, bank: built.bank };
+    const ownedIds = new Set(squad.picks.map((pick) => pick.playerId));
+    const byId = new Map(doctored.map((player) => [player.id, player]));
+
     const alerts = generateAlerts({
       ...baseContext,
-      watchedIds,
-      squad: { picks, captainId: watchedIds[0]!, bank: contextBank },
+      players: doctored,
+      watchedIds: [...flaggedIds],
+      squad: { picks: squad.picks, captainId: squad.captainId, bank: squad.bank },
     });
-    const byId = new Map(players.map((player) => [player.id, player]));
-
     const withReplacement = alerts.filter((alert) => alert.replacementId !== null);
-    expect(withReplacement.length).toBeGreaterThan(0);
 
-    for (const alert of withReplacement) {
-      const target = byId.get(alert.targetId!)!;
-      const replacement = byId.get(alert.replacementId!)!;
+    it('offers replacements at all', () => {
+      expect(withReplacement.length).toBeGreaterThan(0);
+    });
 
-      expect(replacement.position).toBe(target.position);
-      expect(replacement.availability).toBe('AVAILABLE');
-      // Affordable means the outgoing sale plus whatever is in the bank covers it.
-      expect(replacement.price).toBeLessThanOrEqual(target.price + contextBank + 0.3);
-      expect(replacement.id).not.toBe(target.id);
-    }
+    it('never suggests a player already in the squad', () => {
+      for (const alert of withReplacement) expect(ownedIds.has(alert.replacementId!)).toBe(false);
+    });
+
+    it('never exceeds the bank — no price-rise slack', () => {
+      for (const alert of withReplacement) {
+        const target = byId.get(alert.targetId!)!;
+        const replacement = byId.get(alert.replacementId!)!;
+        expect(replacement.position).toBe(target.position);
+        expect(replacement.availability).toBe('AVAILABLE');
+        expect(replacement.price).toBeLessThanOrEqual(target.price + squad.bank + 1e-9);
+      }
+    });
+
+    it('only suggests transfers the apply path accepts', () => {
+      for (const alert of withReplacement) {
+        const applied = applyTransfer(
+          squad,
+          alert.targetId!,
+          alert.replacementId!,
+          doctored,
+          meta.rules,
+        );
+        expect(applied, `${alert.title} → ${alert.actionLabel}`).not.toBeNull();
+        expect(validateSquad(applied!.picks, doctored, meta.rules)).toEqual([]);
+      }
+    });
   });
 
   it('is deterministic — same input, identical output', () => {
@@ -193,10 +224,45 @@ describe('findReplacement', () => {
 
     const poor = findReplacement(target, players, { ...context, bank: 0 });
     expect(poor).not.toBeNull();
-    expect(poor!.price).toBeLessThanOrEqual(target.price + 0.3);
+    expect(poor!.price).toBeLessThanOrEqual(target.price);
 
     const rich = findReplacement(target, players, { ...context, bank: 5 });
-    expect(rich!.price).toBeLessThanOrEqual(target.price + 5.3);
+    expect(rich!.price).toBeLessThanOrEqual(target.price + 5);
+  });
+
+  it('rejects a candidate even £0.1m over budget', () => {
+    const target = players.find((p) => p.position === 'MID' && p.availability === 'AVAILABLE')!;
+    const justOver: Player = {
+      ...target,
+      id: -1,
+      price: Math.round((target.price + 0.1) * 10) / 10,
+      epNext: 99,
+    };
+    const replacement = findReplacement(target, [target, justOver], { ...context, bank: 0 });
+    expect(replacement).toBeNull();
+  });
+
+  it('skips players already owned', () => {
+    const target = players.find((p) => p.position === 'MID' && p.availability === 'AVAILABLE')!;
+    const best = findReplacement(target, players, { ...context, bank: 100 })!;
+    const next = findReplacement(target, players, {
+      ...context,
+      bank: 100,
+      ownedIds: new Set([best.id]),
+    });
+    expect(next?.id).not.toBe(best.id);
+  });
+
+  it('falls through to the next-best candidate when the legality gate refuses one', () => {
+    const target = players.find((p) => p.position === 'MID' && p.availability === 'AVAILABLE')!;
+    const best = findReplacement(target, players, { ...context, bank: 100 })!;
+    const gated = findReplacement(target, players, {
+      ...context,
+      bank: 100,
+      isLegal: (candidate) => candidate.id !== best.id,
+    });
+    expect(gated).not.toBeNull();
+    expect(gated!.id).not.toBe(best.id);
   });
 
   it('rejects candidates who would breach the club limit', () => {
@@ -267,7 +333,7 @@ describe('findReplacement', () => {
         p.id !== injured.id &&
         p.position === 'MID' &&
         p.availability === 'AVAILABLE' &&
-        p.price <= injured.price + 100.3 &&
+        p.price <= injured.price + 100 &&
         (p.epNext > 0 || p.minutes > 0),
     );
     const best = Math.max(...allValid.map((p) => p.epNext));

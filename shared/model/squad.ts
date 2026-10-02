@@ -26,7 +26,8 @@ export interface SquadValidationError {
     | 'OVER_BUDGET'
     | 'DUPLICATE_PLAYER'
     | 'FORMATION_INVALID'
-    | 'NO_CAPTAIN';
+    | 'NO_CAPTAIN'
+    | 'CAPTAIN_ON_BENCH';
   message: string;
 }
 
@@ -178,6 +179,13 @@ export function validateSquad(
     errors.push({ code: 'NO_CAPTAIN', message: 'No captain selected.' });
   }
 
+  if (picks.some((pick) => (pick.isCaptain || pick.isViceCaptain) && pick.slot > STARTER_SLOTS)) {
+    errors.push({
+      code: 'CAPTAIN_ON_BENCH',
+      message: 'The captain and vice-captain must both be in the starting XI.',
+    });
+  }
+
   return errors;
 }
 
@@ -199,7 +207,12 @@ export function canSwap(
   return isValidFormation(startersOf(resolvePicks(swapped, players)), rules);
 }
 
-/** Returns the new picks with the two players' slots exchanged, or null. */
+/**
+ * Returns the new picks with the two players' slots exchanged, or null.
+ *
+ * The armband travels with the slot: a benched captain or vice hands the role
+ * to the player coming on, because neither may sit on the bench.
+ */
 export function applySwap(
   starterId: number,
   benchId: number,
@@ -211,8 +224,17 @@ export function applySwap(
   if (starter.slot > STARTER_SLOTS || bench.slot <= STARTER_SLOTS) return null;
 
   return picks.map((pick) => {
-    if (pick.playerId === starterId) return { ...pick, slot: bench.slot };
-    if (pick.playerId === benchId) return { ...pick, slot: starter.slot };
+    if (pick.playerId === starterId) {
+      return { ...pick, slot: bench.slot, isCaptain: false, isViceCaptain: false };
+    }
+    if (pick.playerId === benchId) {
+      return {
+        ...pick,
+        slot: starter.slot,
+        isCaptain: starter.isCaptain,
+        isViceCaptain: starter.isViceCaptain,
+      };
+    }
     return pick;
   });
 }

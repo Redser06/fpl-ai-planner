@@ -22,9 +22,17 @@ import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 
-import { fetchBootstrap, fetchEntry, fetchEntryPicks, fetchFixtures } from './fpl/client';
+import {
+  fetchBootstrap,
+  fetchEntry,
+  fetchEntryPicks,
+  fetchFixtures,
+  FplHttpError,
+} from './fpl/client';
+import { callerKey, RateLimiter, TtlCache } from './http/guard';
 import {
   buildFdrMatrix,
+  fdrEventCount,
   toFixture,
   toMillions,
   transformBootstrap,
@@ -33,6 +41,8 @@ import { latestClosedEvent } from './ingest/importEvent';
 import {
   fetchPublicSquad,
   InvalidEntryIdError,
+  parseEntryId,
+  type PublicSquadResult,
 } from './ingest/publicSquad';
 import { writeFixtures, writePlayers, writeSmallDatasets } from './ingest/store';
 import type { Gameweek, Squad, SquadPick } from '../../shared/types';
@@ -73,14 +83,15 @@ async function runIngest(): Promise<{ players: number; fixtures: number }> {
   const fixtures = rawFixtures.map(toFixture);
 
   const fromEvent = meta.nextEvent ?? meta.currentEvent ?? 1;
-  const fdr = buildFdrMatrix(teams, fixtures, fromEvent, FDR_HORIZON);
+  const eventCount = fdrEventCount(gameweeks, fromEvent, FDR_HORIZON);
+  const fdr = buildFdrMatrix(teams, fixtures, fromEvent, eventCount);
 
   await Promise.all([
     writePlayers(db, players, ingestedAt),
     writeFixtures(db, fixtures, ingestedAt),
     writeSmallDatasets(
       db,
-      { teams, gameweeks, meta, fdr: { fromEvent, eventCount: FDR_HORIZON, rows: fdr } },
+      { teams, gameweeks, meta, fdr: { fromEvent, eventCount, rows: fdr } },
       ingestedAt,
     ),
   ]);
@@ -125,7 +136,7 @@ export const ingestNow = onCall({ region: REGION, timeoutSeconds: 300 }, async (
  * is a normal state, not an error, and the client falls back to the manual
  * squad builder.
  */
-export const importSquad = onCall({ region: REGION }, async (request) => {
+export const importSquad = onCall({ region: REGION, maxInstances: 3 }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to import a squad.');
 
   const entryId = Number(request.data?.entryId);
@@ -141,7 +152,16 @@ export const importSquad = onCall({ region: REGION }, async (request) => {
     return { status: 'SEASON_NOT_STARTED' as const };
   }
 
-  const [entry, picks] = await Promise.all([fetchEntry(entryId), fetchEntryPicks(entryId, event)]);
+  let entry: Awaited<ReturnType<typeof fetchEntry>>;
+  let picks: Awaited<ReturnType<typeof fetchEntryPicks>>;
+  try {
+    [entry, picks] = await Promise.all([fetchEntry(entryId), fetchEntryPicks(entryId, event)]);
+  } catch (error) {
+    if (error instanceof FplHttpError && error.isNotFound) {
+      throw new HttpsError('not-found', `No FPL team has entry id ${entryId}.`);
+    }
+    throw error;
+  }
 
   if (!picks) {
     return { status: 'PICKS_NOT_PUBLIC' as const, entryName: entry.name };
@@ -183,21 +203,50 @@ export const importSquad = onCall({ region: REGION }, async (request) => {
  * not our ingested datasets. The client prefers `importSquad` once the callable
  * is deployed and configured; this stays as the documented fallback.
  */
-export const fetchSquadPublic = onRequest({ region: REGION }, async (req, res) => {
-  // CORS so the static site (any origin: hosting URL, preview channel, localhost)
-  // can call it. It reads no cookies and returns no per-user secret, so a wildcard
-  // origin is safe here; the squad it returns is FPL-public once the deadline passes.
-  res.set('Access-Control-Allow-Origin', '*');
+const proxyLimiter = new RateLimiter(10, 60_000);
+const proxyCache = new TtlCache<PublicSquadResult>(5 * 60_000);
 
-  try {
-    const result = await fetchPublicSquad(req.query.entryId);
-    res.status(200).json(result);
-  } catch (error) {
-    if (error instanceof InvalidEntryIdError) {
-      res.status(400).json({ error: error.message });
+export const fetchSquadPublic = onRequest(
+  { region: REGION, maxInstances: 2, timeoutSeconds: 90 },
+  async (req, res) => {
+    // CORS so the static site (any origin: hosting URL, preview channel, localhost)
+    // can call it. It reads no cookies and returns no per-user secret, so a wildcard
+    // origin is safe here; the squad it returns is FPL-public once the deadline passes.
+    res.set('Access-Control-Allow-Origin', '*');
+
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Only GET is supported.' });
       return;
     }
-    logger.error('fetchSquadPublic failed', error);
-    res.status(502).json({ error: 'Upstream FPL request failed.' });
-  }
-});
+
+    if (!proxyLimiter.allow(callerKey(req.headers['x-forwarded-for'], req.ip ?? 'unknown'))) {
+      res.status(429).json({ error: 'Too many squad lookups — try again in a minute.' });
+      return;
+    }
+
+    try {
+      const entryId = parseEntryId(req.query.entryId);
+      const cacheKey = String(entryId);
+      const cached = proxyCache.get(cacheKey);
+      if (cached) {
+        res.status(200).json(cached);
+        return;
+      }
+
+      const result = await fetchPublicSquad(entryId);
+      proxyCache.set(cacheKey, result);
+      res.status(200).json(result);
+    } catch (error) {
+      if (error instanceof InvalidEntryIdError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      if (error instanceof FplHttpError && error.isNotFound) {
+        res.status(404).json({ error: 'No FPL team has that entry id.', code: 'ENTRY_NOT_FOUND' });
+        return;
+      }
+      logger.error('fetchSquadPublic failed', error);
+      res.status(502).json({ error: 'Upstream FPL request failed.', code: 'UPSTREAM_FAILED' });
+    }
+  },
+);

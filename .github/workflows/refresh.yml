@@ -49,8 +49,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run tests
+        run: npm test
+
       - name: Refresh the public data snapshot
         run: npm run snapshot
+        env:
+          # Squads pre-fetched as an import fallback; override with the
+          # SNAPSHOT_ENTRY_IDS repository variable (comma-separated).
+          SNAPSHOT_ENTRY_IDS: ${{ vars.SNAPSHOT_ENTRY_IDS || '4698335' }}
 
       - name: Build the production app
         run: npm run build
